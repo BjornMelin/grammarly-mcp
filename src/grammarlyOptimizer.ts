@@ -1,18 +1,19 @@
-import { z } from "zod";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { type ZodType, z } from "zod";
 import {
   createBrowserUseClient,
   createGrammarlySession,
   type GrammarlyScores,
   runGrammarlyScoreTask,
-} from "./browser/grammarlyTask.js";
-import type { AppConfig } from "./config.js";
-import { log } from "./config.js";
+} from "./browser/grammarlyTask";
+import type { AppConfig } from "./config";
+import { log } from "./config";
 import {
   analyzeTextWithClaude,
   RewriterToneSchema,
   rewriteTextWithClaude,
   summarizeOptimizationWithClaude,
-} from "./llm/claudeClient.js";
+} from "./llm/claudeClient";
 
 export const ToolInputSchema = z.object({
   text: z.string().min(1, "text is required"),
@@ -56,8 +57,10 @@ export const ToolInputSchema = z.object({
     ),
 });
 
+type StructuredContent = NonNullable<CallToolResult["structuredContent"]>;
+
 /** Zod schema for MCP 2025-11-25 structured output. */
-export const ToolOutputSchema = z.object({
+export const ToolOutputSchema: ZodType<StructuredContent> = z.object({
   final_text: z.string().describe("The optimized or original text."),
   ai_detection_percent: z
     .number()
@@ -114,27 +117,30 @@ export interface GrammarlyOptimizeResult {
   notes: string;
 }
 
+// Threshold policy: require at least one available score to verify; any
+// unavailable score is treated as passing its respective threshold.
 function thresholdsMet(
   scores: GrammarlyScores,
   maxAiPercent: number,
   maxPlagiarismPercent: number,
 ): boolean {
-  const aiUnavailable = scores.aiDetectionPercent === null;
-  const plagiarismUnavailable = scores.plagiarismPercent === null;
+  const aiAvailable = scores.aiDetectionPercent !== null;
+  const plagiarismAvailable = scores.plagiarismPercent !== null;
 
-  if (aiUnavailable && plagiarismUnavailable) {
+  if (!aiAvailable && !plagiarismAvailable) {
     log("warn", "Cannot verify thresholds: both Grammarly scores unavailable");
     return false;
   }
 
+  // Narrow nullable score fields before comparison to satisfy strict null checks.
   const aiOk =
-    scores.aiDetectionPercent === null
-      ? true
-      : scores.aiDetectionPercent <= maxAiPercent;
+    aiAvailable && scores.aiDetectionPercent !== null
+      ? scores.aiDetectionPercent <= maxAiPercent
+      : true;
   const plagiarismOk =
-    scores.plagiarismPercent === null
-      ? true
-      : scores.plagiarismPercent <= maxPlagiarismPercent;
+    plagiarismAvailable && scores.plagiarismPercent !== null
+      ? scores.plagiarismPercent <= maxPlagiarismPercent
+      : true;
 
   return aiOk && plagiarismOk;
 }
@@ -158,10 +164,6 @@ export async function runGrammarlyOptimization(
     domain_hint,
     custom_instructions,
   } = input;
-
-  const maxAiPercent = max_ai_percent;
-  const maxPlagiarismPercent = max_plagiarism_percent;
-  const maxIterations = max_iterations;
 
   const history: HistoryEntry[] = [];
 
@@ -203,8 +205,8 @@ export async function runGrammarlyOptimization(
 
       reachedThresholds = thresholdsMet(
         lastScores,
-        maxAiPercent,
-        maxPlagiarismPercent,
+        max_ai_percent,
+        max_plagiarism_percent,
       );
 
       const notes = reachedThresholds
@@ -230,16 +232,16 @@ export async function runGrammarlyOptimization(
         currentText,
         lastScores.aiDetectionPercent,
         lastScores.plagiarismPercent,
-        maxAiPercent,
-        maxPlagiarismPercent,
+        max_ai_percent,
+        max_plagiarism_percent,
         tone,
         domain_hint,
       );
 
       reachedThresholds = thresholdsMet(
         lastScores,
-        maxAiPercent,
-        maxPlagiarismPercent,
+        max_ai_percent,
+        max_plagiarism_percent,
       );
 
       await onProgress?.("Analysis complete", 100);
@@ -258,18 +260,21 @@ export async function runGrammarlyOptimization(
     // Mode: optimize
     await onProgress?.("Starting optimization loop...", 15);
     log("info", "Starting optimization loop", {
-      maxIterations,
-      maxAiPercent,
-      maxPlagiarismPercent,
+      max_iterations,
+      max_ai_percent,
+      max_plagiarism_percent,
     });
 
-    for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+    for (let iteration = 1; iteration <= max_iterations; iteration += 1) {
       iterationsUsed = iteration;
 
       // Progress is iteration-based (not wall clock): 15–85% reserved for loop.
-      const iterationProgress = 15 + ((iteration - 1) / maxIterations) * 70;
+      const iterationProgress = Math.max(
+        15,
+        Math.min(85, 15 + ((iteration - 1) / max_iterations) * 70),
+      );
       await onProgress?.(
-        `Iteration ${iteration}/${maxIterations}: Rewriting with Claude...`,
+        `Iteration ${iteration}/${max_iterations}: Rewriting with Claude...`,
         iterationProgress,
       );
 
@@ -277,20 +282,25 @@ export async function runGrammarlyOptimization(
         originalText: currentText,
         lastAiPercent: lastScores.aiDetectionPercent,
         lastPlagiarismPercent: lastScores.plagiarismPercent,
-        targetMaxAiPercent: maxAiPercent,
-        targetMaxPlagiarismPercent: maxPlagiarismPercent,
+        targetMaxAiPercent: max_ai_percent,
+        targetMaxPlagiarismPercent: max_plagiarism_percent,
         tone,
         domainHint: domain_hint,
         customInstructions: custom_instructions,
-        maxIterations,
+        maxIterations: max_iterations,
       });
 
       currentText = rewriteResult.rewrittenText;
 
       // Progress: Re-scoring for this iteration.
-      const scoringProgress = 15 + (iteration / maxIterations) * 70;
+      // Use a mid-iteration offset so scoring progress is strictly between
+      // rewrite in this iteration and rewrite of the next iteration.
+      const scoringProgress = Math.max(
+        15,
+        Math.min(85, 15 + ((iteration - 1 + 0.5) / max_iterations) * 70),
+      );
       await onProgress?.(
-        `Iteration ${iteration}/${maxIterations}: Re-scoring with Grammarly...`,
+        `Iteration ${iteration}/${max_iterations}: Re-scoring with Grammarly...`,
         scoringProgress,
       );
 
@@ -304,8 +314,8 @@ export async function runGrammarlyOptimization(
 
       reachedThresholds = thresholdsMet(
         lastScores,
-        maxAiPercent,
-        maxPlagiarismPercent,
+        max_ai_percent,
+        max_plagiarism_percent,
       );
 
       history.push({
@@ -337,8 +347,8 @@ export async function runGrammarlyOptimization(
       thresholdsMet: reachedThresholds,
       history,
       finalText: currentText,
-      maxAiPercent,
-      maxPlagiarismPercent,
+      maxAiPercent: max_ai_percent,
+      maxPlagiarismPercent: max_plagiarism_percent,
     });
 
     // Progress: Complete

@@ -9,7 +9,7 @@
     "grammarly-mcp-server": "./dist/server.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsup src/server.ts --format esm --clean",
     "start": "node dist/server.js",
     "type-check": "tsc -p tsconfig.json --noEmit",
     "biome:check": "biome check .",
@@ -31,6 +31,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.3.8",
     "@types/node": "^20.14.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.6.0"
   }
 }

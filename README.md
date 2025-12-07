@@ -50,8 +50,10 @@ Single-tool Model Context Protocol (MCP) server that:
 
   ```bash
   npm install -g @anthropic-ai/claude-code
-  claude login
+  claude login   # Uses your Claude Pro/Max subscription
   ```
+
+  > **Note:** If you have a Claude Pro or Max subscription, `claude login` is the recommended authentication method — no API key needed, and usage counts against your subscription (not billed separately).
 
 - **npm**, **pnpm**, or **yarn** for installing dependencies
 
@@ -77,6 +79,9 @@ Set required environment variables before running:
 export BROWSER_USE_API_KEY="bu_..."           # from cloud.browser-use.com
 export BROWSER_USE_PROFILE_ID="profile_..."   # profile synced with Grammarly login
 export LOG_LEVEL="info"                       # optional: debug | info | warn | error
+
+# Optional: Claude API key (only if not using 'claude login')
+# export CLAUDE_API_KEY="sk-ant-..."          # for API key billing instead of subscription
 ```
 
 **Creating a Browser Use profile:**
@@ -402,11 +407,14 @@ Use grammarly_optimize_text with:
 
 **Problem:** Rewriting fails with authentication errors
 
-**Solution:**
+**Solution (for CLI auth / Pro/Max subscription):**
 ```bash
 claude logout
 claude login
 ```
+
+**Solution (for API key auth):**
+Ensure `CLAUDE_API_KEY` is set correctly in your environment or MCP client's `env` block.
 
 ---
 
@@ -430,6 +438,7 @@ claude login
 - **UI Dependency**: Browser Use uses natural-language element discovery, not fixed CSS selectors. Grammarly UI changes may break automation.
 - **Text Length Limits**: Very long texts may exceed Browser Use or Claude context limits. Consider chunking in your MCP host logic.
 - **Rate Limits**: Browser Use Cloud and Grammarly may have usage limits. Monitor your quotas.
+- **Progress notifications**: The server uses the public progress-token accessor when available in `@modelcontextprotocol/sdk` (expected in versions ≥ 1.25.x) and falls back to a guarded private `_meta` read on older SDKs.
 
 ---
 

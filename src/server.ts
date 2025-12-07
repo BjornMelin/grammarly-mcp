@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { config, log } from "./config.js";
+import { config, log } from "./config";
 import {
   type GrammarlyOptimizeInput,
   type ProgressCallback,
   runGrammarlyOptimization,
   ToolInputSchema,
   ToolOutputSchema,
-} from "./grammarlyOptimizer.js";
+} from "./grammarlyOptimizer";
 
 /**
  * Create and configure the MCP server.
@@ -60,9 +60,27 @@ async function main(): Promise<void> {
       });
 
       // Create progress callback for MCP progress notifications.
-      // NOTE: `extra._meta?.progressToken` is currently the available hook in the SDK;
-      // if a public progress token accessor is added, prefer that instead.
-      const progressToken = extra._meta?.progressToken;
+      // Prefer a public accessor if available (MCP SDK >=1.25.x expected to expose a getter;
+      // see README), and only fall back to the private `_meta` escape hatch when nothing
+      // else exists.
+      // Allow either the public getter (preferred) or fall back to legacy fields.
+      type ProgressTokenCarrier = {
+        getProgressToken?: () => unknown;
+        progressToken?: unknown;
+        _meta?: { progressToken?: unknown };
+      };
+      const progressTokenCarrier = extra as unknown as ProgressTokenCarrier;
+      const progressTokenCandidate =
+        typeof progressTokenCarrier.getProgressToken === "function"
+          ? progressTokenCarrier.getProgressToken()
+          : progressTokenCarrier.progressToken ??
+            // Legacy/private path: keep guarded to avoid hard-coupling to internals.
+            progressTokenCarrier._meta?.progressToken;
+      const progressToken =
+        typeof progressTokenCandidate === "string" ||
+        typeof progressTokenCandidate === "number"
+          ? progressTokenCandidate
+          : undefined;
       const onProgress: ProgressCallback = async (message, progress) => {
         if (extra.sendNotification && progressToken) {
           try {
@@ -75,8 +93,10 @@ async function main(): Promise<void> {
                 message,
               },
             });
-          } catch {
-            // Progress notifications are optional; ignore failures
+          } catch (err) {
+            log("debug", "Failed to send progress notification", {
+              error: err instanceof Error ? err.message : err,
+            });
           }
         }
         log("debug", `Progress: ${message}`, { progress });
@@ -104,18 +124,53 @@ async function main(): Promise<void> {
 
   log("info", "Starting Grammarly Browser Use MCP server over stdio");
 
-  await server.connect(transport);
+  const timeoutMs = config.connectTimeoutMs;
+  const connectPromise = server.connect(transport);
+
+  let timeoutHandle: NodeJS.Timeout | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error(`Server connect timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    await Promise.race([connectPromise, timeoutPromise]);
+  } catch (error: unknown) {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+
+    log("error", "Failed to start MCP server", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    // Attempt to clean up the transport if it exposes a close method.
+    const maybeClose = (transport as { close?: () => unknown }).close;
+    if (typeof maybeClose === "function") {
+      try {
+        await maybeClose();
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+
+    process.exit(1);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 }
 
 // Top-level await is supported in Node 18+ ESM.
 void main().catch((error: unknown) => {
   if (error instanceof Error) {
-    log("error", "[grammarly-mcp:fatal]", {
-      message: error.message,
-      stack: error.stack,
-    });
+    console.error("Fatal error:", error.message);
+    console.error(error.stack ?? "(no stack trace)");
   } else {
-    log("error", "[grammarly-mcp:fatal] Unknown error", { error });
+    console.error("Fatal error (non-Error):", error);
   }
   process.exit(1);
 });

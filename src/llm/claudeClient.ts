@@ -1,8 +1,8 @@
 import { generateObject, generateText } from "ai";
 import { claudeCode } from "ai-sdk-provider-claude-code";
 import { z } from "zod";
-import type { AppConfig } from "../config.js";
-import { log } from "../config.js";
+import type { AppConfig } from "../config";
+import { log } from "../config";
 
 export const RewriterToneSchema = z.enum([
   "neutral",
@@ -13,12 +13,19 @@ export const RewriterToneSchema = z.enum([
 ]);
 export type RewriterTone = z.infer<typeof RewriterToneSchema>;
 
-function ensureClaudeApiKey(apiKey: string): void {
-  if (!process.env.CLAUDE_API_KEY) {
-    process.env.CLAUDE_API_KEY = apiKey;
-  }
-  if (!process.env.ANTHROPIC_API_KEY) {
-    process.env.ANTHROPIC_API_KEY = apiKey;
+/**
+ * Log which authentication method will be used.
+ * - If API key is set, Claude Code uses API key auth (billed per-use)
+ * - If not set, Claude Code uses CLI auth via 'claude login' (Pro/Max subscription)
+ */
+function logAuthMethod(apiKey: string | undefined): void {
+  if (apiKey) {
+    log("debug", "Using Claude API key authentication");
+  } else {
+    log(
+      "debug",
+      "Using Claude CLI authentication (Pro/Max subscription via 'claude login')",
+    );
   }
 }
 
@@ -86,7 +93,7 @@ export async function rewriteTextWithClaude(
     maxIterations,
   } = params;
 
-  ensureClaudeApiKey(appConfig.claudeApiKey);
+  logAuthMethod(appConfig.claudeApiKey);
   const modelId = chooseClaudeModel(originalText.length, maxIterations);
   const model = claudeCode(modelId);
 
@@ -160,14 +167,33 @@ export async function rewriteTextWithClaude(
     "-----",
   ].join("\n");
 
+  const timeoutMs = appConfig.claudeRequestTimeoutMs;
   log("info", "Calling Claude for rewrite", { modelId });
 
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
   try {
-    const result = await generateObject({
-      model,
-      schema: RewriteSchema,
-      prompt,
-    });
+    const result = await Promise.race([
+      generateObject({
+        model,
+        schema: RewriteSchema,
+        prompt,
+      }),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          log("error", "Claude rewrite timed out", {
+            modelId,
+            timeoutMs,
+            promptPreview: prompt.slice(0, 500),
+          });
+          reject(
+            new Error(
+              `Claude rewrite request exceeded timeout of ${timeoutMs}ms`,
+            ),
+          );
+        }, timeoutMs);
+      }),
+    ]);
 
     const object = result.object;
 
@@ -181,6 +207,10 @@ export async function rewriteTextWithClaude(
     throw new Error(
       `Claude rewrite failed: ${error instanceof Error ? error.message : String(error)}`,
     );
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
 }
 
@@ -196,7 +226,7 @@ export async function analyzeTextWithClaude(
   domainHint?: string,
 ): Promise<string> {
   const modelId = chooseClaudeModel(text.length, 1);
-  ensureClaudeApiKey(appConfig.claudeApiKey);
+  logAuthMethod(appConfig.claudeApiKey);
   const model = claudeCode(modelId);
 
   const aiText =
@@ -281,7 +311,7 @@ export async function summarizeOptimizationWithClaude(
   },
 ): Promise<string> {
   const modelId = chooseClaudeModel(summaryInput.finalText.length, 1);
-  ensureClaudeApiKey(appConfig.claudeApiKey);
+  logAuthMethod(appConfig.claudeApiKey);
   const model = claudeCode(modelId);
 
   const prompt = [
