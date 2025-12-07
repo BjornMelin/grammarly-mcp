@@ -4,11 +4,79 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { config, log } from "./config";
 import {
   type GrammarlyOptimizeInput,
+  type GrammarlyOptimizeResult,
   type ProgressCallback,
   runGrammarlyOptimization,
   ToolInputSchema,
   ToolOutputSchema,
 } from "./grammarlyOptimizer";
+
+/**
+ * Format optimization result as human-readable markdown.
+ */
+function formatAsMarkdown(result: GrammarlyOptimizeResult): string {
+  const statusEmoji = result.thresholds_met ? "✅" : "⚠️";
+  const aiScore =
+    result.ai_detection_percent !== null
+      ? `${result.ai_detection_percent}%`
+      : "N/A";
+  const plagiarismScore =
+    result.plagiarism_percent !== null
+      ? `${result.plagiarism_percent}%`
+      : "N/A";
+
+  const lines: string[] = [
+    `# Grammarly Optimization Result ${statusEmoji}`,
+    "",
+    "## Summary",
+    "",
+    `| Metric | Value |`,
+    `|--------|-------|`,
+    `| AI Detection | ${aiScore} |`,
+    `| Plagiarism | ${plagiarismScore} |`,
+    `| Thresholds Met | ${result.thresholds_met ? "Yes" : "No"} |`,
+    `| Iterations Used | ${result.iterations_used} |`,
+  ];
+
+  if (result.live_url) {
+    lines.push(`| Live Preview | [Browser Session](${result.live_url}) |`);
+  }
+
+  lines.push("", "## Notes", "", result.notes);
+
+  if (result.history.length > 0) {
+    lines.push("", "## Iteration History", "");
+    lines.push("| Iteration | AI % | Plagiarism % | Note |");
+    lines.push("|-----------|------|--------------|------|");
+    for (const entry of result.history) {
+      const ai =
+        entry.ai_detection_percent !== null
+          ? `${entry.ai_detection_percent}%`
+          : "N/A";
+      const plag =
+        entry.plagiarism_percent !== null
+          ? `${entry.plagiarism_percent}%`
+          : "N/A";
+      // Truncate long notes for table readability
+      const note =
+        entry.note.length > 60 ? `${entry.note.slice(0, 57)}...` : entry.note;
+      lines.push(`| ${entry.iteration} | ${ai} | ${plag} | ${note} |`);
+    }
+  }
+
+  lines.push(
+    "",
+    "---",
+    "",
+    "## Final Text",
+    "",
+    "```",
+    result.final_text,
+    "```",
+  );
+
+  return lines.join("\n");
+}
 
 /**
  * Create and configure the MCP server.
@@ -109,8 +177,12 @@ async function main(): Promise<void> {
       const result = await runGrammarlyOptimization(config, parsed, onProgress);
       const validatedOutput = ToolOutputSchema.parse(result);
 
-      // Return both text content (for compatibility) and structured content (MCP 2025-11-25)
-      const textSummary = JSON.stringify(validatedOutput, null, 2);
+      // Format output based on response_format preference
+      // Use result (GrammarlyOptimizeResult) for formatting, validatedOutput for structuredContent
+      const textSummary =
+        parsed.response_format === "markdown"
+          ? formatAsMarkdown(result)
+          : JSON.stringify(validatedOutput, null, 2);
 
       return {
         content: [
