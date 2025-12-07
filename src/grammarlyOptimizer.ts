@@ -2,9 +2,11 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { BrowserUse } from "browser-use-sdk";
 import { type ZodType, z } from "zod";
 import {
+  BrowserUseLlmSchema,
   createBrowserUseClient,
   createGrammarlySession,
   type GrammarlyScores,
+  type GrammarlyScoreTaskResult,
   runGrammarlyScoreTask,
 } from "./browser/grammarlyTask";
 import type { AppConfig } from "./config";
@@ -56,6 +58,31 @@ export const ToolInputSchema = z.object({
     .describe(
       "Extra constraints (e.g., preserve citations, do not change code blocks).",
     ),
+  browser_use_llm: BrowserUseLlmSchema.default("browser-use-llm").describe(
+    "LLM for Browser Use. Default 'browser-use-llm' is cheapest ($0.002/step) AND most optimized.",
+  ),
+  proxy_country_code: z
+    .string()
+    .length(2)
+    .optional()
+    .describe(
+      "ISO 3166-1 alpha-2 country code for proxy (e.g., 'us', 'gb'). 240+ countries supported.",
+    ),
+  response_format: z
+    .enum(["json", "markdown"])
+    .default("json")
+    .describe(
+      "Output format: 'json' for structured data, 'markdown' for human-readable.",
+    ),
+  max_steps: z
+    .number()
+    .int()
+    .min(5)
+    .max(100)
+    .optional()
+    .describe(
+      "Maximum Browser Use steps per scoring task (default 25). Prevents runaway tasks.",
+    ),
 });
 
 type StructuredContent = NonNullable<CallToolResult["structuredContent"]>;
@@ -89,6 +116,13 @@ export const ToolOutputSchema: ZodType<StructuredContent> = z.object({
     )
     .describe("History of scores and notes for each iteration."),
   notes: z.string().describe("Summary or analysis notes from Claude."),
+  live_url: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      "Real-time browser preview URL for debugging (from Browser Use session).",
+    ),
 });
 
 /** Callback for MCP progress notifications during optimization (0-100%). */
@@ -116,6 +150,7 @@ export interface GrammarlyOptimizeResult {
   thresholds_met: boolean;
   history: HistoryEntry[];
   notes: string;
+  live_url: string | null;
 }
 
 // Threshold policy: require at least one available score to verify; any
@@ -164,12 +199,15 @@ export async function runGrammarlyOptimization(
     tone,
     domain_hint,
     custom_instructions,
+    browser_use_llm,
+    proxy_country_code,
+    max_steps,
   } = input;
 
   const history: HistoryEntry[] = [];
 
   let currentText = text;
-  let lastScores: GrammarlyScores | null = null;
+  let lastScores: GrammarlyScoreTaskResult | null = null;
   let iterationsUsed = 0;
   let reachedThresholds = false;
 
@@ -178,9 +216,19 @@ export async function runGrammarlyOptimization(
 
   const browserUseClient = createBrowserUseClient(appConfig);
   let sessionId: string | null = null;
+  let liveUrl: string | null = null;
+
+  // Enable flashMode for score_only mode (faster execution).
+  const flashMode = mode === "score_only";
 
   try {
-    sessionId = await createGrammarlySession(browserUseClient, appConfig);
+    const sessionResult = await createGrammarlySession(
+      browserUseClient,
+      appConfig,
+      { proxyCountryCode: proxy_country_code },
+    );
+    sessionId = sessionResult.sessionId;
+    liveUrl = sessionResult.liveUrl;
 
     // Progress: Initial scoring
     await onProgress?.("Running initial Grammarly scoring...", 10);
@@ -192,6 +240,14 @@ export async function runGrammarlyOptimization(
       sessionId,
       currentText,
       appConfig,
+      {
+        llm: browser_use_llm,
+        flashMode,
+        maxSteps: max_steps,
+        iteration: 0,
+        mode,
+      },
+      liveUrl,
     );
 
     history.push({
@@ -222,6 +278,7 @@ export async function runGrammarlyOptimization(
         thresholds_met: reachedThresholds,
         history,
         notes,
+        live_url: liveUrl,
       };
     }
 
@@ -255,6 +312,7 @@ export async function runGrammarlyOptimization(
         thresholds_met: reachedThresholds,
         history,
         notes: analysis,
+        live_url: liveUrl,
       };
     }
 
@@ -311,6 +369,14 @@ export async function runGrammarlyOptimization(
         sessionId,
         currentText,
         appConfig,
+        {
+          llm: browser_use_llm,
+          flashMode: false, // Disable flashMode during optimization for accuracy
+          maxSteps: max_steps,
+          iteration,
+          mode,
+        },
+        liveUrl,
       );
 
       reachedThresholds = thresholdsMet(
@@ -363,6 +429,7 @@ export async function runGrammarlyOptimization(
       thresholds_met: reachedThresholds,
       history,
       notes,
+      live_url: liveUrl,
     };
   } finally {
     if (sessionId) {

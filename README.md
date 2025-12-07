@@ -17,6 +17,7 @@ Single-tool Model Context Protocol (MCP) server that:
 
 ## Table of Contents
 
+- [Quick Start (5 Minutes)](#quick-start-5-minutes)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Environment Variables](#environment-variables)
@@ -30,12 +31,43 @@ Single-tool Model Context Protocol (MCP) server that:
   - [OpenAI Codex CLI](#openai-codex-cli)
   - [Generic stdio MCP Hosts](#generic-stdio-mcp-hosts)
 - [Tool: grammarly_optimize_text](#tool-grammarly_optimize_text)
+  - [Browser Use LLM Options](#browser-use-llm-options)
 - [How It Works](#how-it-works)
 - [Example Usage](#example-usage)
 - [Troubleshooting](#troubleshooting)
 - [Security Considerations](#security-considerations)
 - [Notes and Limitations](#notes-and-limitations)
 - [License](#license)
+
+---
+
+## Quick Start (5 Minutes)
+
+**Prerequisites:** Node.js 18+, Grammarly Pro account, Claude Code CLI (`npm install -g @anthropic-ai/claude-code && claude login`)
+
+```bash
+# 1. Clone and build
+git clone https://github.com/your-username/grammarly-browseruse-mcp-server.git
+cd grammarly-browseruse-mcp-server
+pnpm install && pnpm build
+
+# 2. Get Browser Use credentials
+# Sign up at https://cloud.browser-use.com
+# Create API key → copy bu_... key
+# Create profile → sync your Grammarly login → copy profile_... ID
+
+# 3. Configure environment
+cp .env.example .env
+# Edit .env with your BROWSER_USE_API_KEY and BROWSER_USE_PROFILE_ID
+
+# 4. Add to Claude Code
+claude mcp add grammarly-browseruse -- node $(pwd)/dist/server.js
+
+# 5. Test it
+claude "Use grammarly_optimize_text with mode score_only on: Hello world test"
+```
+
+For detailed setup including other MCP clients (Cursor, VS Code, Windsurf), see sections below.
 
 ---
 
@@ -279,6 +311,10 @@ Any MCP-compatible host supporting stdio transport can use:
 | `tone` | enum | `"neutral"` | `"neutral"`, `"formal"`, `"informal"`, `"academic"`, `"custom"` |
 | `domain_hint` | string | — | Optional domain context (e.g., "legal", "medical") |
 | `custom_instructions` | string | — | Additional rewriting instructions |
+| `browser_use_llm` | enum | `"browser-use-llm"` | LLM for browser automation (see [LLM Options](#browser-use-llm-options)) |
+| `proxy_country_code` | string | — | ISO 3166-1 alpha-2 country code for geo-routing (e.g., `"us"`, `"gb"`) |
+| `response_format` | enum | `"json"` | Output format: `"json"` or `"markdown"` |
+| `max_steps` | number | `25` | Maximum Browser Use steps per task (prevents runaway automation) |
 
 ### Output Schema
 
@@ -297,11 +333,48 @@ Any MCP-compatible host supporting stdio transport can use:
       "note": "string"
     }
   ],
-  "notes": "string"
+  "notes": "string",
+  "live_url": "string | null"  // Real-time browser preview URL for debugging
 }
 ```
 
 The result is returned as both structured JSON and a `text` content block for compatibility with all MCP hosts.
+
+When `response_format: "markdown"` is used, the output is formatted as a human-readable report with tables and sections.
+
+### Browser Use LLM Options
+
+The `browser_use_llm` parameter selects which model drives browser automation. Default is `browser-use-llm` which is **cheapest AND most optimized** for browser tasks.
+
+| Model | Cost/Step | Best For |
+|-------|-----------|----------|
+| **`browser-use-llm`** | **$0.002** | ⭐ **Default**: Cheapest + optimized for browser automation |
+| `gemini-flash-lite-latest` | $0.005 | Ultra budget |
+| `gemini-flash-latest` | $0.005 | Budget + fast |
+| `gpt-4.1-mini` | $0.0075 | Budget OpenAI |
+| `gemini-2.5-flash` | $0.0075 | Budget Google |
+| `gpt-4o-mini` | $0.01 | Simple tasks |
+| `llama-4-maverick-17b-128e-instruct` | $0.01 | Open source |
+| `o4-mini` | $0.02 | OpenAI reasoning |
+| `gpt-4.1` | $0.025 | OpenAI latest |
+| `gemini-2.5-pro` | $0.025 | Google pro |
+| `o3` | $0.03 | Best OpenAI accuracy |
+| `gemini-3-pro-preview` | $0.03 | Google vision preview |
+| `claude-3-7-sonnet-20250219` | $0.03 | Anthropic balanced |
+| `gpt-4o` | $0.03 | Complex reasoning |
+| `claude-sonnet-4-20250514` | $0.05 | Anthropic accurate |
+| `claude-sonnet-4-5-20250929` | $0.05 | Anthropic latest |
+| `claude-opus-4-5-20251101` | $0.10 | Anthropic best (premium) |
+
+**Cost estimate per task** (assuming ~15 steps):
+
+| Mode | Steps | Cost @ $0.002/step |
+|------|-------|-------------------|
+| `score_only` | ~15 | ~$0.04 |
+| `analyze` | ~15 | ~$0.04 |
+| `optimize` (5 iterations) | ~90 | ~$0.19 |
+
+*Includes $0.01 task initialization fee per task*
 
 ---
 
@@ -391,7 +464,7 @@ Use grammarly_optimize_text with:
 
 **Problem:** `ai_detection_percent` returns `null`
 
-**Solution:** Your Grammarly plan may not include AI Detector. This feature requires Grammarly Premium or Business plans with AI detection enabled.
+**Solution:** Your Grammarly plan may not include AI Detector. This feature requires a Grammarly Pro subscription with AI detection enabled.
 
 ### Tool not appearing in client
 
@@ -434,7 +507,7 @@ Ensure `CLAUDE_API_KEY` is set correctly in your environment or MCP client's `en
 
 ## Notes and Limitations
 
-- **Grammarly Plan Required**: AI Detector and Plagiarism Checker require a Grammarly Premium or Business plan. If unavailable, scores return `null`.
+- **Grammarly Plan Required**: AI Detector and Plagiarism Checker require a Grammarly Pro subscription. If unavailable, scores return `null`.
 - **UI Dependency**: Browser Use uses natural-language element discovery, not fixed CSS selectors. Grammarly UI changes may break automation.
 - **Text Length Limits**: Very long texts may exceed Browser Use or Claude context limits. Consider chunking in your MCP host logic.
 - **Rate Limits**: Browser Use Cloud and Grammarly may have usage limits. Monitor your quotas.

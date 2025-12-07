@@ -5,6 +5,61 @@ import { z } from "zod";
 import type { AppConfig } from "../config";
 import { log } from "../config";
 
+/** Supported LLMs from Browser Use Cloud SDK v2 */
+export const BrowserUseLlmSchema = z.enum([
+  // Default - Cheapest + Optimized ($0.002/step)
+  "browser-use-llm",
+  // Budget ($0.005-$0.01/step)
+  "gemini-flash-lite-latest",
+  "gemini-flash-latest",
+  "gpt-4.1-mini",
+  "gemini-2.5-flash",
+  "gpt-4o-mini",
+  "llama-4-maverick-17b-128e-instruct",
+  // Mid-tier ($0.02-$0.03/step)
+  "o4-mini",
+  "gpt-4.1",
+  "gpt-4o",
+  "gemini-2.5-pro",
+  "o3",
+  "gemini-3-pro-preview",
+  "claude-3-7-sonnet-20250219",
+  // Premium ($0.05-$0.10/step)
+  "claude-sonnet-4-20250514",
+  "claude-sonnet-4-5-20250929",
+  "claude-opus-4-5-20251101",
+]);
+
+export type BrowserUseLlm = z.infer<typeof BrowserUseLlmSchema>;
+
+/** Options for creating a Grammarly session */
+export interface GrammarlySessionOptions {
+  /** ISO 3166-1 alpha-2 country code for proxy (e.g., 'us', 'gb'). 240+ countries supported. */
+  proxyCountryCode?: string | null;
+}
+
+/** Result from creating a Grammarly session */
+export interface GrammarlySessionResult {
+  /** Session ID for subsequent tasks */
+  sessionId: string;
+  /** Real-time browser preview URL for debugging */
+  liveUrl: string | null;
+}
+
+/** Options for running a Grammarly score task */
+export interface GrammarlyTaskOptions {
+  /** LLM model for Browser Use. Default 'browser-use-llm' is cheapest and most optimized. */
+  llm?: BrowserUseLlm;
+  /** Enable flash mode for faster execution (good for score_only mode). */
+  flashMode?: boolean;
+  /** Maximum steps before stopping (prevents runaway tasks). */
+  maxSteps?: number;
+  /** Current iteration number for metadata tracking. */
+  iteration?: number;
+  /** Mode for metadata tracking (score_only, analyze, optimize). */
+  mode?: string;
+}
+
 const MAX_USER_TEXT_LENGTH = 8000;
 const REMOVED_DIRECTIVE_PLACEHOLDER = "[[REMOVED_PROMPT_DIRECTIVE]]";
 const TRUNCATION_PLACEHOLDER = "[[TRUNCATED_DUE_TO_LENGTH]]";
@@ -65,7 +120,11 @@ export const GrammarlyScoresSchema = z.object({
 
 export type GrammarlyScores = z.infer<typeof GrammarlyScoresSchema>;
 
-export type GrammarlyScoreTaskResult = GrammarlyScores;
+/** Extended result including liveUrl for debugging */
+export interface GrammarlyScoreTaskResult extends GrammarlyScores {
+  /** Real-time browser preview URL (captured from session) */
+  liveUrl?: string | null;
+}
 
 type CreateTaskRequestWithSchema<T extends z.ZodTypeAny> = Omit<
   BrowserUse.CreateTaskRequest,
@@ -124,19 +183,35 @@ export function createBrowserUseClient(appConfig: AppConfig): BrowserUseClient {
 export async function createGrammarlySession(
   client: BrowserUseClient,
   appConfig: AppConfig,
-): Promise<string> {
-  log("debug", "Creating Browser Use session with synced profile");
+  options?: GrammarlySessionOptions,
+): Promise<GrammarlySessionResult> {
+  log("debug", "Creating Browser Use session with synced profile", {
+    proxyCountryCode: options?.proxyCountryCode,
+  });
   try {
     const session = await client.sessions.createSession({
       profileId: appConfig.browserUseProfileId,
+      // Pre-navigate to Grammarly for faster task execution
+      startUrl: "https://app.grammarly.com",
+      // Optional proxy for geo-routing
+      proxyCountryCode: options?.proxyCountryCode as
+        | BrowserUse.ProxyCountryCode
+        | undefined,
     });
 
     if (!session || typeof session.id !== "string") {
       throw new Error("Browser Use session did not return a valid id");
     }
 
-    log("info", "Browser Use session created", { sessionId: session.id });
-    return session.id;
+    log("info", "Browser Use session created", {
+      sessionId: session.id,
+      liveUrl: session.liveUrl,
+    });
+
+    return {
+      sessionId: session.id,
+      liveUrl: session.liveUrl ?? null,
+    };
   } catch (error: unknown) {
     if (error instanceof Error) {
       log("error", "Failed to create Browser Use session", {
@@ -150,25 +225,58 @@ export async function createGrammarlySession(
   }
 }
 
+/** Default max steps to prevent runaway tasks */
+const DEFAULT_MAX_STEPS = 25;
+
+/** Allowed domains for Grammarly tasks (security hardening) */
+const GRAMMARLY_ALLOWED_DOMAINS = ["grammarly.com", "app.grammarly.com"];
+
 /** Execute Browser Use task to score text via Grammarly's AI Detector. */
 export async function runGrammarlyScoreTask(
   client: BrowserUseClient,
   sessionId: string,
   text: string,
   appConfig: AppConfig,
+  options?: GrammarlyTaskOptions,
+  /** Optional liveUrl from session to include in result */
+  liveUrl?: string | null,
 ): Promise<GrammarlyScoreTaskResult> {
   const taskPrompt = buildGrammarlyTaskPrompt(text);
 
-  log("info", "Starting Browser Use Grammarly scoring task");
+  const llm = options?.llm ?? "browser-use-llm";
+  const flashMode = options?.flashMode ?? false;
+  const maxSteps = options?.maxSteps ?? DEFAULT_MAX_STEPS;
+
+  log("info", "Starting Browser Use Grammarly scoring task", {
+    llm,
+    flashMode,
+    maxSteps,
+  });
 
   try {
     const createTaskRequest: CreateTaskRequestWithSchema<
       typeof GrammarlyScoresSchema
     > = {
       sessionId,
-      llm: "browser-use-llm",
       task: taskPrompt,
       schema: GrammarlyScoresSchema,
+
+      // LLM Selection (user-configurable)
+      llm: llm as BrowserUse.SupportedLlMs,
+
+      // Navigation & Security (Browser Use API v2)
+      startUrl: "https://app.grammarly.com",
+      maxSteps,
+      allowedDomains: GRAMMARLY_ALLOWED_DOMAINS,
+
+      // Performance (Browser Use API v2)
+      flashMode,
+
+      // Debugging metadata
+      metadata: {
+        mode: options?.mode ?? "unknown",
+        iteration: String(options?.iteration ?? 0),
+      },
     };
 
     const defaultTimeoutMs =
@@ -205,11 +313,15 @@ export async function runGrammarlyScoreTask(
       throw new Error("Browser Use task returned invalid score structure");
     }
 
-    const scores: GrammarlyScoreTaskResult = parsedScores.data;
+    const scores: GrammarlyScoreTaskResult = {
+      ...parsedScores.data,
+      liveUrl: liveUrl ?? null,
+    };
 
     log("info", "Received Grammarly scores from Browser Use", {
       aiDetectionPercent: scores.aiDetectionPercent,
       plagiarismPercent: scores.plagiarismPercent,
+      liveUrl: scores.liveUrl,
     });
 
     return scores;
