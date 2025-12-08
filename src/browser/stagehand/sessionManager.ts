@@ -142,6 +142,11 @@ export class BrowserbaseSessionManager {
    */
   async closeSession(sessionId: string): Promise<void> {
     try {
+      await this.bb.sessions.update(sessionId, {
+        status: "REQUEST_RELEASE",
+        projectId: this.projectId,
+      });
+
       // Clear cache entry (session will timeout/close automatically on Browserbase side)
       if (this.cachedSessionId === sessionId) {
         this.cachedSessionId = null;

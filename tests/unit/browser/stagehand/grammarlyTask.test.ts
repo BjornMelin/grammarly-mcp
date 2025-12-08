@@ -103,12 +103,22 @@ describe("runStagehandGrammarlyTask", () => {
 	describe("text handling", () => {
 		it("processes text longer than 8000 characters", async () => {
 			const longText = "a".repeat(10000);
-			const stagehand = createMockStagehand([createMockPage("https://app.grammarly.com")]);
+			const mockFill = vi.fn().mockResolvedValue(undefined);
+			const mockPage = {
+				...createMockPage("https://app.grammarly.com"),
+				locator: vi.fn().mockReturnValue({
+					fill: mockFill,
+				}),
+			};
+			const stagehand = createMockStagehand([mockPage]);
 
 			await runStagehandGrammarlyTask(stagehand as unknown as Stagehand, longText);
 
-			// Verify act was called (text handling occurred)
-			expect(mockStagehandAct).toHaveBeenCalled();
+			// Verify text was truncated to MAX_TEXT_LENGTH (8000) before fill
+			expect(mockPage.locator).toHaveBeenCalledWith('[contenteditable="true"]');
+			expect(mockFill).toHaveBeenCalledTimes(1);
+			expect(mockFill.mock.calls[0][0]).toHaveLength(8000);
+			expect(mockFill.mock.calls[0][0]).toBe("a".repeat(8000));
 		});
 
 		it("processes short text correctly", async () => {
@@ -217,7 +227,8 @@ describe("runStagehandGrammarlyTask", () => {
 
 			// Check that locator.fill() was called for long text
 			expect(mockPage.locator).toHaveBeenCalledWith('[contenteditable="true"]');
-			expect(mockFill).toHaveBeenCalled();
+			expect(mockFill).toHaveBeenCalledTimes(1);
+			expect(mockFill.mock.calls[0][0]).toBe(longText);
 		});
 
 	});

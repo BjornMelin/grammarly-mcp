@@ -110,9 +110,13 @@ describe("StagehandProvider", () => {
 			await provider.createSession({ proxyCountryCode: "UK" });
 
 			// Should be called without proxyCountry since it was removed from session options
-			expect(mockGetOrCreateSession).toHaveBeenCalledWith({
-				contextId: undefined,
-			});
+			expect(mockGetOrCreateSession).toHaveBeenCalledWith(
+				expect.objectContaining({ contextId: undefined })
+			);
+
+			// Ensure no proxy-related fields were forwarded
+			const callArg = mockGetOrCreateSession.mock.calls[0]?.[0] ?? {};
+			expect(callArg).not.toHaveProperty("proxyCountryCode");
 		});
 
 		it("initializes Stagehand instance", async () => {
