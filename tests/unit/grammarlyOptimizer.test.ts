@@ -6,21 +6,21 @@ const mockCreateBrowserProvider = vi.fn();
 const mockProviderCreateSession = vi.fn();
 const mockProviderScoreText = vi.fn();
 const mockProviderCloseSession = vi.fn();
-const mockRewriteTextWithClaude = vi.fn();
-const mockAnalyzeTextWithClaude = vi.fn();
-const mockSummarizeOptimizationWithClaude = vi.fn();
+const mockRewriteText = vi.fn();
+const mockAnalyzeText = vi.fn();
+const mockSummarizeOptimization = vi.fn();
 
 // Mock the browser provider module
 vi.mock("../../src/browser/provider", () => ({
 	createBrowserProvider: (...args: unknown[]) => mockCreateBrowserProvider(...args),
 }));
 
-// Mock the Claude client module
-vi.mock("../../src/llm/claudeClient", () => ({
-	rewriteTextWithClaude: (...args: unknown[]) => mockRewriteTextWithClaude(...args),
-	analyzeTextWithClaude: (...args: unknown[]) => mockAnalyzeTextWithClaude(...args),
-	summarizeOptimizationWithClaude: (...args: unknown[]) =>
-		mockSummarizeOptimizationWithClaude(...args),
+// Mock the rewrite client module
+vi.mock("../../src/llm/rewriteClient", () => ({
+	rewriteText: (...args: unknown[]) => mockRewriteText(...args),
+	analyzeText: (...args: unknown[]) => mockAnalyzeText(...args),
+	summarizeOptimization: (...args: unknown[]) =>
+		mockSummarizeOptimization(...args),
 	RewriterToneSchema: {
 		default: vi.fn().mockReturnThis(),
 		describe: vi.fn().mockReturnThis(),
@@ -46,6 +46,7 @@ import {
 } from "../../src/grammarlyOptimizer";
 
 const baseConfig: AppConfig = {
+	ignoreSystemEnv: false,
 	browserProvider: "stagehand",
 	browserUseApiKey: undefined,
 	browserUseProfileId: undefined,
@@ -55,7 +56,15 @@ const baseConfig: AppConfig = {
 	browserbaseContextId: undefined,
 	stagehandModel: "gemini-2.5-flash",
 	stagehandCacheDir: undefined,
+	stagehandLlmProvider: undefined,
+	rewriteLlmProvider: undefined,
+	claudeModel: "auto",
+	openaiModel: "gpt-4o",
+	googleModel: "gemini-2.5-flash",
 	claudeApiKey: "test-claude-key",
+	openaiApiKey: undefined,
+	googleApiKey: undefined,
+	anthropicApiKey: undefined,
 	claudeRequestTimeoutMs: 120000,
 	connectTimeoutMs: 30000,
 	logLevel: "error",
@@ -302,12 +311,12 @@ describe("runGrammarlyOptimization", () => {
 			notes: "Scores extracted",
 		});
 		mockProviderCloseSession.mockResolvedValue(undefined);
-		mockRewriteTextWithClaude.mockResolvedValue({
+		mockRewriteText.mockResolvedValue({
 			rewrittenText: "Rewritten text",
 			reasoning: "Made text more human-like",
 		});
-		mockAnalyzeTextWithClaude.mockResolvedValue("Analysis: Text appears AI-generated");
-		mockSummarizeOptimizationWithClaude.mockResolvedValue("Optimization summary");
+		mockAnalyzeText.mockResolvedValue("Analysis: Text appears AI-generated");
+		mockSummarizeOptimization.mockResolvedValue("Optimization summary");
 	});
 
 	afterEach(() => {
@@ -332,7 +341,7 @@ describe("runGrammarlyOptimization", () => {
 			expect(result.plagiarism_percent).toBe(2);
 			expect(result.iterations_used).toBe(0);
 			expect(result.thresholds_met).toBe(true);
-			expect(mockRewriteTextWithClaude).not.toHaveBeenCalled();
+			expect(mockRewriteText).not.toHaveBeenCalled();
 		});
 
 		it("reports thresholds not met for high scores", async () => {
@@ -372,7 +381,7 @@ describe("runGrammarlyOptimization", () => {
 
 	describe("analyze mode", () => {
 		it("returns analysis from Claude", async () => {
-			mockAnalyzeTextWithClaude.mockResolvedValue(
+			mockAnalyzeText.mockResolvedValue(
 				"Analysis: High AI detection, consider rewriting"
 			);
 
@@ -382,8 +391,8 @@ describe("runGrammarlyOptimization", () => {
 			});
 
 			expect(result.notes).toBe("Analysis: High AI detection, consider rewriting");
-			expect(mockAnalyzeTextWithClaude).toHaveBeenCalled();
-			expect(mockRewriteTextWithClaude).not.toHaveBeenCalled();
+			expect(mockAnalyzeText).toHaveBeenCalled();
+			expect(mockRewriteText).not.toHaveBeenCalled();
 		});
 
 		it("includes scores in result", async () => {
@@ -410,7 +419,7 @@ describe("runGrammarlyOptimization", () => {
 				domain_hint: "university essay",
 			});
 
-			expect(mockAnalyzeTextWithClaude).toHaveBeenCalledWith(
+			expect(mockAnalyzeText).toHaveBeenCalledWith(
 				expect.anything(),
 				expect.anything(),
 				expect.anything(),
@@ -450,7 +459,7 @@ describe("runGrammarlyOptimization", () => {
 
 			expect(result.thresholds_met).toBe(true);
 			expect(result.iterations_used).toBe(2); // Stopped early
-			expect(mockRewriteTextWithClaude).toHaveBeenCalledTimes(2);
+			expect(mockRewriteText).toHaveBeenCalledTimes(2);
 		});
 
 		it("stops at max_iterations if thresholds never met", async () => {
@@ -468,11 +477,11 @@ describe("runGrammarlyOptimization", () => {
 
 			expect(result.thresholds_met).toBe(false);
 			expect(result.iterations_used).toBe(3);
-			expect(mockRewriteTextWithClaude).toHaveBeenCalledTimes(3);
+			expect(mockRewriteText).toHaveBeenCalledTimes(3);
 		});
 
 		it("uses rewritten text for subsequent iterations", async () => {
-			mockRewriteTextWithClaude
+			mockRewriteText
 				.mockResolvedValueOnce({
 					rewrittenText: "First rewrite",
 					reasoning: "Step 1",
@@ -521,7 +530,7 @@ describe("runGrammarlyOptimization", () => {
 					notes: "Final",
 				});
 
-			mockRewriteTextWithClaude.mockResolvedValue({
+			mockRewriteText.mockResolvedValue({
 				rewrittenText: "Optimized",
 				reasoning: "Improved text",
 			});
@@ -543,7 +552,7 @@ describe("runGrammarlyOptimization", () => {
 				plagiarismPercent: 2,
 				notes: "Success on first try",
 			});
-			mockSummarizeOptimizationWithClaude.mockResolvedValue(
+			mockSummarizeOptimization.mockResolvedValue(
 				"Optimization completed successfully"
 			);
 
@@ -553,7 +562,7 @@ describe("runGrammarlyOptimization", () => {
 			});
 
 			expect(result.notes).toBe("Optimization completed successfully");
-			expect(mockSummarizeOptimizationWithClaude).toHaveBeenCalled();
+			expect(mockSummarizeOptimization).toHaveBeenCalled();
 		});
 	});
 

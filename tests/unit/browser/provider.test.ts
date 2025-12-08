@@ -30,6 +30,7 @@ vi.mock("../../../src/browser/browserUseProvider", () => {
 import { createBrowserProvider } from "../../../src/browser/provider";
 
 const baseConfig: AppConfig = {
+	ignoreSystemEnv: false,
 	browserProvider: "stagehand",
 	browserUseApiKey: undefined,
 	browserUseProfileId: undefined,
@@ -39,7 +40,15 @@ const baseConfig: AppConfig = {
 	browserbaseContextId: undefined,
 	stagehandModel: "gemini-2.5-flash",
 	stagehandCacheDir: undefined,
+	stagehandLlmProvider: undefined,
+	rewriteLlmProvider: undefined,
+	claudeModel: "auto",
+	openaiModel: "gpt-4o",
+	googleModel: "gemini-2.5-flash",
 	claudeApiKey: "test-claude-key",
+	openaiApiKey: undefined,
+	googleApiKey: undefined,
+	anthropicApiKey: undefined,
 	claudeRequestTimeoutMs: 120000,
 	connectTimeoutMs: 30000,
 	logLevel: "error",

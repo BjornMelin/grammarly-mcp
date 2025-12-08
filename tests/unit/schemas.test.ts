@@ -4,7 +4,7 @@ import {
 	GrammarlyExtractSchema,
 	ObservationSchema,
 } from "../../src/browser/stagehand/schemas";
-import { RewriterToneSchema } from "../../src/llm/claudeClient";
+import { RewriterToneSchema } from "../../src/llm/rewriteClient";
 
 describe("ToolInputSchema", () => {
 	describe("valid inputs", () => {

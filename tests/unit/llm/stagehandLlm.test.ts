@@ -1,221 +1,166 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { AppConfig } from "../../../src/config";
 import { detectLlmProvider, getLlmModelName } from "../../../src/llm/stagehandLlm";
 
+// Base test config - all fields explicitly set for test isolation
+const baseConfig: AppConfig = {
+	ignoreSystemEnv: false,
+	browserProvider: "stagehand",
+	browserUseApiKey: undefined,
+	browserUseProfileId: undefined,
+	browserbaseApiKey: "test-api-key",
+	browserbaseProjectId: "test-project-id",
+	browserbaseSessionId: undefined,
+	browserbaseContextId: undefined,
+	stagehandModel: "gemini-2.5-flash",
+	stagehandCacheDir: undefined,
+	stagehandLlmProvider: undefined,
+	rewriteLlmProvider: undefined,
+	claudeModel: "auto",
+	openaiModel: "gpt-4o",
+	googleModel: "gemini-2.5-flash",
+	claudeApiKey: undefined,
+	openaiApiKey: undefined,
+	googleApiKey: undefined,
+	anthropicApiKey: undefined,
+	claudeRequestTimeoutMs: 120000,
+	connectTimeoutMs: 30000,
+	logLevel: "error",
+	browserUseDefaultTimeoutMs: 300000,
+	defaultMaxAiPercent: 10,
+	defaultMaxPlagiarismPercent: 5,
+	defaultMaxIterations: 5,
+};
+
 describe("detectLlmProvider", () => {
-	// Store original env values
-	let originalAnthropicKey: string | undefined;
-	let originalOpenaiKey: string | undefined;
-	let originalGoogleKey: string | undefined;
-	let originalGeminiKey: string | undefined;
+	describe("explicit provider selection", () => {
+		it("returns explicit stagehandLlmProvider when set", () => {
+			const config = { ...baseConfig, stagehandLlmProvider: "google" as const };
+			expect(detectLlmProvider(config)).toBe("google");
+		});
 
-	beforeEach(() => {
-		// Save original values
-		originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
-		originalOpenaiKey = process.env.OPENAI_API_KEY;
-		originalGoogleKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-		originalGeminiKey = process.env.GEMINI_API_KEY;
+		it("explicit provider overrides API key detection", () => {
+			const config = {
+				...baseConfig,
+				stagehandLlmProvider: "claude-code" as const,
+				openaiApiKey: "test-key", // Would normally trigger openai
+			};
+			expect(detectLlmProvider(config)).toBe("claude-code");
+		});
 
-		// Clear all provider keys for clean state
-		delete process.env.ANTHROPIC_API_KEY;
-		delete process.env.OPENAI_API_KEY;
-		delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-		delete process.env.GEMINI_API_KEY;
+		it("explicit anthropic ignores google key in config", () => {
+			const config = {
+				...baseConfig,
+				stagehandLlmProvider: "anthropic" as const,
+				googleApiKey: "test-key", // Would normally trigger google
+			};
+			expect(detectLlmProvider(config)).toBe("anthropic");
+		});
 	});
 
-	afterEach(() => {
-		// Restore original values
-		if (originalAnthropicKey !== undefined) {
-			process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
-		} else {
-			delete process.env.ANTHROPIC_API_KEY;
-		}
-		if (originalOpenaiKey !== undefined) {
-			process.env.OPENAI_API_KEY = originalOpenaiKey;
-		} else {
-			delete process.env.OPENAI_API_KEY;
-		}
-		if (originalGoogleKey !== undefined) {
-			process.env.GOOGLE_GENERATIVE_AI_API_KEY = originalGoogleKey;
-		} else {
-			delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-		}
-		if (originalGeminiKey !== undefined) {
-			process.env.GEMINI_API_KEY = originalGeminiKey;
-		} else {
-			delete process.env.GEMINI_API_KEY;
-		}
+	describe("auto-detection from config API keys", () => {
+		it("returns claude-code when no API keys are set", () => {
+			expect(detectLlmProvider(baseConfig)).toBe("claude-code");
+		});
+
+		it("returns openai when openaiApiKey is set", () => {
+			const config = { ...baseConfig, openaiApiKey: "sk-test" };
+			expect(detectLlmProvider(config)).toBe("openai");
+		});
+
+		it("returns google when googleApiKey is set", () => {
+			const config = { ...baseConfig, googleApiKey: "google-key" };
+			expect(detectLlmProvider(config)).toBe("google");
+		});
+
+		it("returns anthropic when anthropicApiKey is set", () => {
+			const config = { ...baseConfig, anthropicApiKey: "sk-ant-test" };
+			expect(detectLlmProvider(config)).toBe("anthropic");
+		});
+
+		it("returns anthropic when claudeApiKey is set", () => {
+			const config = { ...baseConfig, claudeApiKey: "sk-ant-test" };
+			expect(detectLlmProvider(config)).toBe("anthropic");
+		});
 	});
 
-	it("returns claude-code when no API keys are set", () => {
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			logLevel: "error",
-		} as AppConfig;
+	describe("priority ordering", () => {
+		it("prioritizes openai over google and anthropic", () => {
+			const config = {
+				...baseConfig,
+				openaiApiKey: "sk-openai",
+				googleApiKey: "google-key",
+				anthropicApiKey: "sk-anthropic",
+			};
+			expect(detectLlmProvider(config)).toBe("openai");
+		});
 
-		expect(detectLlmProvider(config)).toBe("claude-code");
-	});
-
-	it("returns openai when OPENAI_API_KEY is set", () => {
-		// OpenAI takes highest priority when its API key is present
-		process.env.OPENAI_API_KEY = "sk-test";
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			logLevel: "error",
-		} as AppConfig;
-
-		expect(detectLlmProvider(config)).toBe("openai");
-	});
-
-	it("returns anthropic when ANTHROPIC_API_KEY is set", () => {
-		process.env.ANTHROPIC_API_KEY = "sk-ant-test";
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			logLevel: "error",
-		} as AppConfig;
-
-		expect(detectLlmProvider(config)).toBe("anthropic");
-	});
-
-	it("returns anthropic when claudeApiKey is set in config", () => {
-		const config: AppConfig = {
-			claudeApiKey: "sk-ant-test",
-			logLevel: "error",
-		} as AppConfig;
-
-		expect(detectLlmProvider(config)).toBe("anthropic");
-	});
-
-	it("returns google when GOOGLE_GENERATIVE_AI_API_KEY is set alone", () => {
-		// Google is selected when its API key is present and OpenAI is not
-		process.env.GOOGLE_GENERATIVE_AI_API_KEY = "google-key";
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			logLevel: "error",
-		} as AppConfig;
-
-		expect(detectLlmProvider(config)).toBe("google");
-	});
-
-	it("returns google when GEMINI_API_KEY is set alone", () => {
-		// GEMINI_API_KEY is an alternative env var name for Google provider
-		process.env.GEMINI_API_KEY = "gemini-key";
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			logLevel: "error",
-		} as AppConfig;
-
-		expect(detectLlmProvider(config)).toBe("google");
-	});
-
-	it("returns google when both Google env vars are set (either works)", () => {
-		// Both env var names should work, but we just need one
-		process.env.GOOGLE_GENERATIVE_AI_API_KEY = "google-key";
-		process.env.GEMINI_API_KEY = "gemini-key";
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			logLevel: "error",
-		} as AppConfig;
-
-		expect(detectLlmProvider(config)).toBe("google");
-	});
-
-	it("prioritizes google over anthropic when both set", () => {
-		// Google takes priority over Anthropic in the detection order
-		process.env.GOOGLE_GENERATIVE_AI_API_KEY = "google-key";
-		process.env.ANTHROPIC_API_KEY = "sk-ant-config";
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			logLevel: "error",
-		} as AppConfig;
-
-		expect(detectLlmProvider(config)).toBe("google");
-	});
-
-	it("prioritizes openai over google and anthropic", () => {
-		process.env.OPENAI_API_KEY = "sk-openai";
-		process.env.GOOGLE_GENERATIVE_AI_API_KEY = "google-key";
-		process.env.ANTHROPIC_API_KEY = "sk-anthropic";
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			logLevel: "error",
-		} as AppConfig;
-
-		expect(detectLlmProvider(config)).toBe("openai");
+		it("prioritizes google over anthropic", () => {
+			const config = {
+				...baseConfig,
+				googleApiKey: "google-key",
+				anthropicApiKey: "sk-anthropic",
+			};
+			expect(detectLlmProvider(config)).toBe("google");
+		});
 	});
 });
 
 describe("getLlmModelName", () => {
-	it.each([
-		["claude-code", undefined, "claude-code/sonnet"],
-		["openai", undefined, "gpt-4o"],
-		["anthropic", undefined, "claude-sonnet-4-20250514"],
-		["google", undefined, "gemini-2.5-flash"],
-	] as const)("returns correct model name for %s provider", (provider, stagehandModel, expected) => {
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			stagehandModel,
-			logLevel: "error",
-		} as AppConfig;
+	describe("with explicit provider", () => {
+		it("returns claude-code/sonnet for claude-code with auto model", () => {
+			expect(getLlmModelName(baseConfig, "claude-code")).toBe("claude-code/sonnet");
+		});
 
-		expect(getLlmModelName(config, provider)).toBe(expected);
+		it("returns claude-code/haiku for claude-code with haiku model", () => {
+			const config = { ...baseConfig, claudeModel: "haiku" as const };
+			expect(getLlmModelName(config, "claude-code")).toBe("claude-code/haiku");
+		});
+
+		it("returns claude-code/opus for claude-code with opus model", () => {
+			const config = { ...baseConfig, claudeModel: "opus" as const };
+			expect(getLlmModelName(config, "claude-code")).toBe("claude-code/opus");
+		});
+
+		it("returns openaiModel for openai provider", () => {
+			expect(getLlmModelName(baseConfig, "openai")).toBe("gpt-4o");
+		});
+
+		it("returns custom openaiModel when set", () => {
+			const config = { ...baseConfig, openaiModel: "gpt-4-turbo" };
+			expect(getLlmModelName(config, "openai")).toBe("gpt-4-turbo");
+		});
+
+		it("returns googleModel for google provider", () => {
+			expect(getLlmModelName(baseConfig, "google")).toBe("gemini-2.5-flash");
+		});
+
+		it("returns custom googleModel when set", () => {
+			const config = { ...baseConfig, googleModel: "gemini-2.5-flash-lite" };
+			expect(getLlmModelName(config, "google")).toBe("gemini-2.5-flash-lite");
+		});
+
+		it("returns fixed model for anthropic provider", () => {
+			expect(getLlmModelName(baseConfig, "anthropic")).toBe("claude-sonnet-4-20250514");
+		});
 	});
 
-	it("uses stagehandModel from config for openai when provided", () => {
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			stagehandModel: "gpt-4-turbo",
-			logLevel: "error",
-		} as AppConfig;
-
-		expect(getLlmModelName(config, "openai")).toBe("gpt-4-turbo");
-	});
-
-	it("uses stagehandModel from config for google when provided", () => {
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			stagehandModel: "gemini-2.5-flash-lite",
-			logLevel: "error",
-		} as AppConfig;
-
-		expect(getLlmModelName(config, "google")).toBe("gemini-2.5-flash-lite");
-	});
-
-	it("returns unknown for unrecognized provider", () => {
-		const config: AppConfig = {
-			claudeApiKey: undefined,
-			logLevel: "error",
-		} as AppConfig;
-
-		// @ts-expect-error Testing invalid provider
-		expect(getLlmModelName(config, "invalid")).toBe("unknown");
-	});
-
-	it("detects provider when not explicitly provided", () => {
-		// Save and clear API keys for this test
-		const savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
-		const savedOpenaiKey = process.env.OPENAI_API_KEY;
-		const savedGoogleKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-		const savedGeminiKey = process.env.GEMINI_API_KEY;
-		delete process.env.ANTHROPIC_API_KEY;
-		delete process.env.OPENAI_API_KEY;
-		delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-		delete process.env.GEMINI_API_KEY;
-
-		try {
-			const config: AppConfig = {
-				claudeApiKey: undefined,
-				logLevel: "error",
-			} as AppConfig;
-
+	describe("with auto-detected provider", () => {
+		it("detects provider when not explicitly provided", () => {
 			// Without any API keys, should detect claude-code
-			expect(getLlmModelName(config)).toBe("claude-code/sonnet");
-		} finally {
-			// Restore
-			if (savedAnthropicKey) process.env.ANTHROPIC_API_KEY = savedAnthropicKey;
-			if (savedOpenaiKey) process.env.OPENAI_API_KEY = savedOpenaiKey;
-			if (savedGoogleKey) process.env.GOOGLE_GENERATIVE_AI_API_KEY = savedGoogleKey;
-			if (savedGeminiKey) process.env.GEMINI_API_KEY = savedGeminiKey;
-		}
+			expect(getLlmModelName(baseConfig)).toBe("claude-code/sonnet");
+		});
+
+		it("uses openaiModel when openaiApiKey triggers openai", () => {
+			const config = { ...baseConfig, openaiApiKey: "sk-test", openaiModel: "gpt-4-turbo" };
+			expect(getLlmModelName(config)).toBe("gpt-4-turbo");
+		});
+	});
+
+	describe("edge cases", () => {
+		it("returns unknown for unrecognized provider", () => {
+			// @ts-expect-error Testing invalid provider
+			expect(getLlmModelName(baseConfig, "invalid")).toBe("unknown");
+		});
 	});
 });
