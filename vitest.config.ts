@@ -32,13 +32,12 @@ export default defineConfig({
 				"src/server.ts", // Entry point with side effects
 				"**/*.d.ts",
 			],
-			// Coverage thresholds are staged: raise by ~10% each milestone.
-			// Owner: tooling team; next bump due 2026-01-31 after adding orchestration tests.
+			// Coverage thresholds enforced in CI. Current: 91%+ achieved.
 			thresholds: {
-				lines: 70,
-				functions: 70,
-				branches: 60,
-				statements: 70,
+				lines: 85,
+				functions: 85,
+				branches: 75,
+				statements: 85,
 			},
 		},
 

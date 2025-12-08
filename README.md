@@ -25,6 +25,7 @@ Single-tool Model Context Protocol (MCP) server for AI detection and plagiarism 
 - [Tool: grammarly_optimize_text](#tool-grammarly_optimize_text)
 - [Session Persistence](#session-persistence)
 - [How It Works](#how-it-works)
+- [Development](#development)
 - [Troubleshooting](#troubleshooting)
 - [Security Considerations](#security-considerations)
 - [Notes and Limitations](#notes-and-limitations)
@@ -524,6 +525,35 @@ MCP Client (Claude Code, Cursor, VS Code, etc.)
    - Re-score via Grammarly
    - Break early if thresholds met
 3. **Generate summary** via Claude
+
+---
+
+## Development
+
+### Build & Quality
+
+```bash
+pnpm install        # Install dependencies
+pnpm build          # Compile TypeScript
+pnpm type-check     # Type checking only
+pnpm biome:check    # Lint + format check
+pnpm biome:fix      # Auto-fix lint + format
+pnpm check-all      # Type check + lint
+```
+
+### Testing
+
+```bash
+pnpm test           # Watch mode
+pnpm test:run       # Run once
+pnpm test:coverage  # With coverage report
+pnpm test:unit      # Unit tests only
+pnpm test:integration  # Integration tests
+```
+
+**Coverage thresholds** (enforced in CI): 85% lines, 85% functions, 75% branches.
+
+Tests use Vitest with V8 coverage. See `tests/` for test structure and `CLAUDE.md` for testing conventions.
 
 ---
 

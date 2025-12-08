@@ -11,7 +11,61 @@ pnpm type-check     # TypeScript type checking only
 pnpm biome:check    # Lint + format check (no writes)
 pnpm biome:fix      # Auto-fix lint + format issues
 pnpm check-all      # Run type-check && biome:check
+
+# Testing
+pnpm test           # Run tests in watch mode
+pnpm test:run       # Run tests once
+pnpm test:coverage  # Run tests with coverage report
+pnpm test:unit      # Run unit tests only
+pnpm test:integration  # Run integration tests (forks pool)
+pnpm test:ci        # CI mode with coverage + JSON reporter
 ```
+
+## Testing
+
+**Framework**: Vitest with V8 coverage provider.
+
+**Coverage thresholds** (enforced in CI):
+- Lines: 85%
+- Functions: 85%
+- Branches: 75%
+- Statements: 85%
+
+**Test structure**:
+```
+tests/
+├── setup.ts              # Global test setup
+├── unit/                 # Fast, isolated unit tests
+│   ├── config.test.ts
+│   ├── server.test.ts
+│   ├── schemas.test.ts
+│   ├── grammarlyOptimizer.test.ts
+│   ├── browser/
+│   │   ├── provider.test.ts
+│   │   ├── browserUseProvider.test.ts
+│   │   ├── grammarlyTask.test.ts
+│   │   └── stagehand/
+│   │       ├── sessionManager.test.ts
+│   │       ├── stagehandProvider.test.ts
+│   │       └── grammarlyTask.test.ts
+│   └── llm/
+│       ├── claudeClient.test.ts
+│       └── stagehandLlm.test.ts
+└── integration/          # Tests requiring more isolation
+    └── stagehandProvider.test.ts
+```
+
+**Mock patterns**:
+- Use `vi.mock()` for module mocks; import after mocking
+- Use `vi.fn()` for function mocks with `mockResolvedValue`/`mockRejectedValue`
+- Use `vi.useFakeTimers()` for retry/backoff tests
+- Stub `setTimeout` globally to skip `sleep()` delays in Stagehand tests
+
+**Key conventions**:
+- All tests are synchronous by default; async only when awaiting promises
+- Mock at module boundaries (SDK clients, external services)
+- Use `test.each()` for parameterized edge cases
+- Attach catch handlers before advancing fake timers to prevent unhandled rejections
 
 ## Architecture
 
