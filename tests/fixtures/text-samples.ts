@@ -55,4 +55,4 @@ export const singleChar = "a";
  * Text with special characters and unicode.
  */
 export const specialCharsText =
-	'Test with "quotes", <brackets>, & ampersands, and émojis 🎉';
+  'Test with "quotes", <brackets>, & ampersands, and émojis 🎉';

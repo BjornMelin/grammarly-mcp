@@ -31,13 +31,20 @@ export function createMockBrowserUseTaskResult(
 
 /**
  * Creates a mock Browser Use client with all primary methods stubbed.
+ * Matches actual SDK structure with nested sessions and tasks objects.
  */
 export function createMockBrowserUseClient(overrides?: Record<string, unknown>) {
 	return {
-		createSession: vi.fn().mockResolvedValue(createMockBrowserUseSession()),
-		runTask: vi.fn().mockResolvedValue(createMockBrowserUseTaskResult()),
-		getSession: vi.fn().mockResolvedValue(createMockBrowserUseSession()),
-		closeSession: vi.fn().mockResolvedValue(undefined),
+		sessions: {
+			createSession: vi.fn().mockResolvedValue(createMockBrowserUseSession()),
+			getSession: vi.fn().mockResolvedValue(createMockBrowserUseSession()),
+			deleteSession: vi.fn().mockResolvedValue(undefined),
+		},
+		tasks: {
+			createTask: vi.fn().mockResolvedValue({
+				complete: vi.fn().mockResolvedValue(createMockBrowserUseTaskResult()),
+			}),
+		},
 		...overrides,
 	};
 }
@@ -46,14 +53,19 @@ export function createMockBrowserUseClient(overrides?: Record<string, unknown>) 
  * Creates a failing Browser Use client for error testing.
  */
 export function createFailingBrowserUseClient(
-	failingMethod: string,
+	failingMethod: "createSession" | "getSession" | "deleteSession" | "createTask",
 	error?: Error,
 ) {
 	const baseClient = createMockBrowserUseClient();
 	const err = error ?? new Error(`Mock failure on ${failingMethod}`);
 
-	if (failingMethod in baseClient) {
-		(baseClient as Record<string, unknown>)[failingMethod] = vi
+	// Map method names to their location in the nested structure
+	if (failingMethod === "createTask") {
+		(baseClient.tasks as Record<string, unknown>)[failingMethod] = vi
+			.fn()
+			.mockRejectedValue(err);
+	} else {
+		(baseClient.sessions as Record<string, unknown>)[failingMethod] = vi
 			.fn()
 			.mockRejectedValue(err);
 	}

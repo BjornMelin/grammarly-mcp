@@ -8,7 +8,7 @@ export function createMockSession(overrides?: Record<string, unknown>) {
 		id: "mock-session-123",
 		status: "RUNNING" as const,
 		projectId: "mock-project-456",
-		createdAt: new Date().toISOString(),
+		createdAt: "2025-01-01T00:00:00.000Z",
 		...overrides,
 	};
 }
@@ -32,6 +32,7 @@ export function createMockBrowserbase(overrides?: Record<string, unknown>) {
 		sessions: {
 			create: vi.fn().mockResolvedValue(createMockSession()),
 			retrieve: vi.fn().mockResolvedValue(createMockSession()),
+			update: vi.fn().mockResolvedValue(undefined),
 			list: vi.fn().mockResolvedValue({ data: [] }),
 			debug: vi.fn().mockResolvedValue({
 				debuggerFullscreenUrl: "https://debug.browserbase.io/mock-session",

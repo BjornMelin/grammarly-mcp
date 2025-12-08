@@ -8,11 +8,12 @@ export type LLMProvider = "claude-code" | "openai" | "anthropic" | "google";
  * Detect which LLM provider to use based on available credentials.
  * Priority: OpenAI > Google > Anthropic > Claude Code CLI (default)
  *
- * The detection checks for explicit API keys first, falling back to
- * Claude Code CLI authentication when no other credentials are present.
+ * The detection checks environment variables for explicit API keys first,
+ * then checks config.claudeApiKey for Anthropic, falling back to
+ * Claude Code CLI authentication when no credentials are present.
  */
 export function detectLlmProvider(config: AppConfig): LLMProvider {
-  // Check for explicit API keys in priority order
+  // Check for explicit API keys in environment (most specific wins)
   if (process.env.OPENAI_API_KEY) {
     return "openai";
   }

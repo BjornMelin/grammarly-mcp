@@ -4,6 +4,7 @@ import type { AppConfig } from "../../../../src/config";
 // Create mock functions at top level
 const mockSessionsCreate = vi.fn();
 const mockSessionsRetrieve = vi.fn();
+const mockSessionsUpdate = vi.fn();
 const mockSessionsDebug = vi.fn();
 const mockContextsCreate = vi.fn();
 
@@ -14,6 +15,7 @@ vi.mock("@browserbasehq/sdk", () => {
 			sessions = {
 				create: mockSessionsCreate,
 				retrieve: mockSessionsRetrieve,
+				update: mockSessionsUpdate,
 				debug: mockSessionsDebug,
 			};
 			contexts = {
@@ -238,6 +240,10 @@ describe("BrowserbaseSessionManager", () => {
 	});
 
 	describe("closeSession", () => {
+		beforeEach(() => {
+			mockSessionsUpdate.mockResolvedValue(undefined);
+		});
+
 		it("clears cached session ID when matching", async () => {
 			const config = {
 				...baseConfig,

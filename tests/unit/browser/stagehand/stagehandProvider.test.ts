@@ -142,21 +142,13 @@ describe("StagehandProvider", () => {
 			expect(result.liveUrl).toBe("https://browserbase.url");
 		});
 
-		it("closes Browserbase session when Stagehand init fails", async () => {
+		it("closes Browserbase session and throws when Stagehand init fails", async () => {
 			mockStagehandInit.mockRejectedValueOnce(new Error("Init failed"));
 
 			const provider = new StagehandProvider(baseConfig);
 
 			await expect(provider.createSession()).rejects.toThrow("Init failed");
 			expect(mockCloseSession).toHaveBeenCalledWith("bb-session-123");
-		});
-
-		it("throws error when Stagehand init fails", async () => {
-			mockStagehandInit.mockRejectedValueOnce(new Error("Init failed"));
-
-			const provider = new StagehandProvider(baseConfig);
-
-			await expect(provider.createSession()).rejects.toThrow("Init failed");
 		});
 	});
 

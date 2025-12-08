@@ -6,7 +6,8 @@ vi.mock("../../../../src/config", () => ({
 }));
 
 // Mock the setTimeout to prevent actual delays
-// This is necessary because the grammarlyTask module uses sleep() internally
+// Using fake timers with sleep() requires advancing timers in each test
+// Instead, immediately invoke callbacks for test speed without test modifications
 vi.stubGlobal(
 	"setTimeout",
 	vi.fn((cb: () => void) => {
