@@ -37,6 +37,7 @@
     "ai": "^5.0.0",
     "ai-sdk-provider-claude-code": "^2.0.0",
     "browser-use-sdk": "^2.0.12",
+    "dotenv": "^17.2.3",
     "zod": "^3.25.7"
   },
   "devDependencies": {

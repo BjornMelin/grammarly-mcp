@@ -1,8 +1,43 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as dotenv from "dotenv";
 import { z } from "zod";
 
+// =============================================================================
+// Environment Loading with Optional Isolation
+// =============================================================================
+
+// Load .env file if it exists
+const envPath = path.resolve(process.cwd(), ".env");
+let dotenvConfig: Record<string, string> = {};
+if (fs.existsSync(envPath)) {
+  const result = dotenv.config({ path: envPath });
+  if (result.parsed) {
+    dotenvConfig = result.parsed;
+  }
+}
+
+// Determine if we should ignore system env vars (bootstrap from either source)
+const ignoreSystemEnv =
+  (
+    dotenvConfig.IGNORE_SYSTEM_ENV ?? process.env.IGNORE_SYSTEM_ENV
+  )?.toLowerCase() === "true";
+
+// Create the effective environment: either .env-only or merged with process.env
+const effectiveEnv = ignoreSystemEnv ? dotenvConfig : process.env;
+
+// =============================================================================
+// Type Definitions
+// =============================================================================
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LLMProvider = "claude-code" | "openai" | "google" | "anthropic";
+export type ClaudeModel = "auto" | "haiku" | "sonnet" | "opus";
 
 export interface AppConfig {
+  // Environment isolation
+  ignoreSystemEnv: boolean;
+
   // Browser provider selection
   browserProvider: "stagehand" | "browser-use";
 
@@ -18,8 +53,24 @@ export interface AppConfig {
   stagehandModel: string | undefined;
   stagehandCacheDir: string | undefined;
 
-  /** Optional: if not set, uses Claude CLI auth (via 'claude login') */
+  // Separate LLM provider controls
+  stagehandLlmProvider: LLMProvider | undefined;
+  rewriteLlmProvider: LLMProvider | undefined;
+
+  // Claude model selection (when using claude-code provider)
+  claudeModel: ClaudeModel;
+
+  // Non-Claude model selection
+  openaiModel: string;
+  googleModel: string;
+
+  // API keys for LLM provider detection
   claudeApiKey: string | undefined;
+  openaiApiKey: string | undefined;
+  googleApiKey: string | undefined;
+  anthropicApiKey: string | undefined;
+
+  // General settings
   claudeRequestTimeoutMs: number;
   connectTimeoutMs: number;
   logLevel: LogLevel;
@@ -29,7 +80,19 @@ export interface AppConfig {
   defaultMaxIterations: number;
 }
 
+// =============================================================================
+// Zod Schema
+// =============================================================================
+
 const EnvSchema = z.object({
+  // Environment isolation
+  IGNORE_SYSTEM_ENV: z
+    .preprocess(
+      (val) => val === "true" || val === true,
+      z.boolean().default(false),
+    )
+    .default(false),
+
   // Provider selection: "stagehand" (default) or "browser-use" (fallback)
   BROWSER_PROVIDER: z.enum(["stagehand", "browser-use"]).default("stagehand"),
 
@@ -45,8 +108,29 @@ const EnvSchema = z.object({
   STAGEHAND_MODEL: z.string().default("gemini-2.5-flash"),
   STAGEHAND_CACHE_DIR: z.string().optional(),
 
-  // Claude API (optional - uses Claude Code CLI auth when not set)
+  // Separate LLM provider controls
+  STAGEHAND_LLM_PROVIDER: z
+    .enum(["claude-code", "openai", "google", "anthropic"])
+    .optional(),
+  REWRITE_LLM_PROVIDER: z
+    .enum(["claude-code", "openai", "google", "anthropic"])
+    .optional(),
+
+  // Claude model selection (when using claude-code provider)
+  CLAUDE_MODEL: z.enum(["auto", "haiku", "sonnet", "opus"]).default("auto"),
+
+  // Non-Claude model selection
+  OPENAI_MODEL: z.string().default("gpt-4o"),
+  GOOGLE_MODEL: z.string().default("gemini-2.5-flash"),
+
+  // API keys
   CLAUDE_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+
+  // General settings
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   CLAUDE_REQUEST_TIMEOUT_MS: z.preprocess((value) => {
     if (typeof value === "string" && value.trim() !== "") {
@@ -62,7 +146,11 @@ const EnvSchema = z.object({
   }, z.number().positive().optional()),
 });
 
-const parsed = EnvSchema.safeParse(process.env);
+// =============================================================================
+// Validation and Config Export
+// =============================================================================
+
+const parsed = EnvSchema.safeParse(effectiveEnv);
 
 if (!parsed.success) {
   // Log to stderr; MCP hosts expect stdout to be protocol-only.
@@ -101,8 +189,23 @@ if (env.CLAUDE_API_KEY) {
   process.env.ANTHROPIC_API_KEY ??= env.CLAUDE_API_KEY;
 }
 
+// Also propagate other API keys to process.env for SDK compatibility
+if (env.OPENAI_API_KEY) {
+  process.env.OPENAI_API_KEY ??= env.OPENAI_API_KEY;
+}
+if (env.GOOGLE_GENERATIVE_AI_API_KEY || env.GEMINI_API_KEY) {
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY ??=
+    env.GOOGLE_GENERATIVE_AI_API_KEY ?? env.GEMINI_API_KEY;
+}
+if (env.ANTHROPIC_API_KEY) {
+  process.env.ANTHROPIC_API_KEY ??= env.ANTHROPIC_API_KEY;
+}
+
 // Default thresholds; can be overridden per-tool call via args.
 export const config: AppConfig = {
+  // Environment isolation
+  ignoreSystemEnv: env.IGNORE_SYSTEM_ENV,
+
   // Provider selection
   browserProvider: env.BROWSER_PROVIDER,
 
@@ -118,8 +221,24 @@ export const config: AppConfig = {
   stagehandModel: env.STAGEHAND_MODEL,
   stagehandCacheDir: env.STAGEHAND_CACHE_DIR,
 
-  // Claude and general settings
+  // Separate LLM provider controls
+  stagehandLlmProvider: env.STAGEHAND_LLM_PROVIDER,
+  rewriteLlmProvider: env.REWRITE_LLM_PROVIDER,
+
+  // Claude model selection
+  claudeModel: env.CLAUDE_MODEL,
+
+  // Non-Claude model selection
+  openaiModel: env.OPENAI_MODEL,
+  googleModel: env.GOOGLE_MODEL,
+
+  // API keys for LLM provider detection
   claudeApiKey: env.CLAUDE_API_KEY,
+  openaiApiKey: env.OPENAI_API_KEY,
+  googleApiKey: env.GOOGLE_GENERATIVE_AI_API_KEY ?? env.GEMINI_API_KEY,
+  anthropicApiKey: env.ANTHROPIC_API_KEY,
+
+  // General settings
   claudeRequestTimeoutMs: env.CLAUDE_REQUEST_TIMEOUT_MS ?? 2 * 60 * 1000,
   connectTimeoutMs: env.CONNECT_TIMEOUT_MS ?? 30_000,
   logLevel: env.LOG_LEVEL,
@@ -128,6 +247,10 @@ export const config: AppConfig = {
   defaultMaxPlagiarismPercent: 5,
   defaultMaxIterations: 5,
 };
+
+// =============================================================================
+// Logging
+// =============================================================================
 
 const LOG_LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
 
