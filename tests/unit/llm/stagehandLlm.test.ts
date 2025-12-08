@@ -7,17 +7,20 @@ describe("detectLlmProvider", () => {
 	let originalAnthropicKey: string | undefined;
 	let originalOpenaiKey: string | undefined;
 	let originalGoogleKey: string | undefined;
+	let originalGeminiKey: string | undefined;
 
 	beforeEach(() => {
 		// Save original values
 		originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
 		originalOpenaiKey = process.env.OPENAI_API_KEY;
 		originalGoogleKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+		originalGeminiKey = process.env.GEMINI_API_KEY;
 
 		// Clear all provider keys for clean state
 		delete process.env.ANTHROPIC_API_KEY;
 		delete process.env.OPENAI_API_KEY;
 		delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+		delete process.env.GEMINI_API_KEY;
 	});
 
 	afterEach(() => {
@@ -36,6 +39,11 @@ describe("detectLlmProvider", () => {
 			process.env.GOOGLE_GENERATIVE_AI_API_KEY = originalGoogleKey;
 		} else {
 			delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+		}
+		if (originalGeminiKey !== undefined) {
+			process.env.GEMINI_API_KEY = originalGeminiKey;
+		} else {
+			delete process.env.GEMINI_API_KEY;
 		}
 	});
 
@@ -81,6 +89,29 @@ describe("detectLlmProvider", () => {
 	it("returns google when GOOGLE_GENERATIVE_AI_API_KEY is set alone", () => {
 		// Google is selected when its API key is present and OpenAI is not
 		process.env.GOOGLE_GENERATIVE_AI_API_KEY = "google-key";
+		const config: AppConfig = {
+			claudeApiKey: undefined,
+			logLevel: "error",
+		} as AppConfig;
+
+		expect(detectLlmProvider(config)).toBe("google");
+	});
+
+	it("returns google when GEMINI_API_KEY is set alone", () => {
+		// GEMINI_API_KEY is an alternative env var name for Google provider
+		process.env.GEMINI_API_KEY = "gemini-key";
+		const config: AppConfig = {
+			claudeApiKey: undefined,
+			logLevel: "error",
+		} as AppConfig;
+
+		expect(detectLlmProvider(config)).toBe("google");
+	});
+
+	it("returns google when both Google env vars are set (either works)", () => {
+		// Both env var names should work, but we just need one
+		process.env.GOOGLE_GENERATIVE_AI_API_KEY = "google-key";
+		process.env.GEMINI_API_KEY = "gemini-key";
 		const config: AppConfig = {
 			claudeApiKey: undefined,
 			logLevel: "error",
@@ -140,6 +171,16 @@ describe("getLlmModelName", () => {
 		expect(getLlmModelName(config, "openai")).toBe("gpt-4-turbo");
 	});
 
+	it("uses stagehandModel from config for google when provided", () => {
+		const config: AppConfig = {
+			claudeApiKey: undefined,
+			stagehandModel: "gemini-2.5-flash-lite",
+			logLevel: "error",
+		} as AppConfig;
+
+		expect(getLlmModelName(config, "google")).toBe("gemini-2.5-flash-lite");
+	});
+
 	it("returns unknown for unrecognized provider", () => {
 		const config: AppConfig = {
 			claudeApiKey: undefined,
@@ -155,9 +196,11 @@ describe("getLlmModelName", () => {
 		const savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
 		const savedOpenaiKey = process.env.OPENAI_API_KEY;
 		const savedGoogleKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+		const savedGeminiKey = process.env.GEMINI_API_KEY;
 		delete process.env.ANTHROPIC_API_KEY;
 		delete process.env.OPENAI_API_KEY;
 		delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+		delete process.env.GEMINI_API_KEY;
 
 		try {
 			const config: AppConfig = {
@@ -172,6 +215,7 @@ describe("getLlmModelName", () => {
 			if (savedAnthropicKey) process.env.ANTHROPIC_API_KEY = savedAnthropicKey;
 			if (savedOpenaiKey) process.env.OPENAI_API_KEY = savedOpenaiKey;
 			if (savedGoogleKey) process.env.GOOGLE_GENERATIVE_AI_API_KEY = savedGoogleKey;
+			if (savedGeminiKey) process.env.GEMINI_API_KEY = savedGeminiKey;
 		}
 	});
 });

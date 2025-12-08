@@ -67,13 +67,19 @@ const AnalysisSchema = z.object({
 export function chooseClaudeModel(
   textLength: number,
   maxIterations: number,
-): "sonnet" | "opus" {
+): "haiku" | "sonnet" | "opus" {
   // Heuristic: prefer opus for very long texts or high iteration counts.
   // 12k characters ≈ 8–9k tokens, where opus maintains quality and longer context.
   // >8 iterations implies heavier rewrite loops; opus reduces retries and instability.
   if (textLength > 12000 || maxIterations > 8) {
     return "opus";
   }
+  // Haiku: cost optimization for short texts with few iterations.
+  // <3k characters is typically 1-2k tokens; ≤3 iterations is light rewrite work.
+  if (textLength < 3000 && maxIterations <= 3) {
+    return "haiku";
+  }
+  // Sonnet: default for moderate complexity.
   return "sonnet";
 }
 

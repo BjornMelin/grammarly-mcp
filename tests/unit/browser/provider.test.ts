@@ -37,7 +37,7 @@ const baseConfig: AppConfig = {
 	browserbaseProjectId: "test-project-id",
 	browserbaseSessionId: undefined,
 	browserbaseContextId: undefined,
-	stagehandModel: "gpt-4o",
+	stagehandModel: "gemini-2.5-flash",
 	stagehandCacheDir: undefined,
 	claudeApiKey: "test-claude-key",
 	claudeRequestTimeoutMs: 120000,

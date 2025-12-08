@@ -30,7 +30,7 @@ vi.mock("../../../../src/browser/stagehand/sessionManager", () => ({
 // Mock stagehand LLM
 vi.mock("../../../../src/llm/stagehandLlm", () => ({
 	createStagehandLlmClient: vi.fn().mockResolvedValue({}),
-	getLlmModelName: vi.fn().mockReturnValue("gpt-4o"),
+	getLlmModelName: vi.fn().mockReturnValue("gemini-2.5-flash"),
 }));
 
 // Mock grammarly task
@@ -49,7 +49,7 @@ const baseConfig: AppConfig = {
 	browserbaseProjectId: "test-project-id",
 	browserbaseSessionId: undefined,
 	browserbaseContextId: undefined,
-	stagehandModel: "gpt-4o",
+	stagehandModel: "gemini-2.5-flash",
 	stagehandCacheDir: undefined,
 	claudeApiKey: "test-claude-key",
 	claudeRequestTimeoutMs: 120000,

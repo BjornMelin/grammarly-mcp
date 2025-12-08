@@ -35,7 +35,7 @@ const testConfig: AppConfig = {
 	browserbaseProjectId: "test-project-id",
 	browserbaseSessionId: undefined,
 	browserbaseContextId: undefined,
-	stagehandModel: "gpt-4o",
+	stagehandModel: "gemini-2.5-flash",
 	stagehandCacheDir: undefined,
 	claudeApiKey: "test-claude-key",
 	claudeRequestTimeoutMs: 120000,
@@ -48,13 +48,25 @@ const testConfig: AppConfig = {
 };
 
 describe("chooseClaudeModel", () => {
+	describe("selects haiku for", () => {
+		it.each([
+			["short text, few iterations", 2000, 2],
+			["minimum values", 1, 1],
+			["boundary text below 3000", 2999, 3],
+			["short text, single iteration", 1500, 1],
+		])("%s (%d chars, %d iterations)", (_, textLength, iterations) => {
+			expect(chooseClaudeModel(textLength, iterations)).toBe("haiku");
+		});
+	});
+
 	describe("selects sonnet for", () => {
 		it.each([
-			["short text, few iterations", 5000, 5],
+			["moderate text, few iterations", 5000, 5],
 			["boundary text length", 12000, 5],
 			["boundary iterations", 5000, 8],
 			["both at boundary", 12000, 8],
-			["minimum values", 1, 1],
+			["short text but many iterations", 2500, 4],
+			["at 3000 chars threshold", 3000, 3],
 			["typical essay", 8000, 3],
 		])("%s (%d chars, %d iterations)", (_, textLength, iterations) => {
 			expect(chooseClaudeModel(textLength, iterations)).toBe("sonnet");
@@ -75,6 +87,20 @@ describe("chooseClaudeModel", () => {
 	});
 
 	describe("boundary conditions", () => {
+		// Haiku boundaries
+		it("2999 chars with 3 iterations returns haiku", () => {
+			expect(chooseClaudeModel(2999, 3)).toBe("haiku");
+		});
+
+		it("3000 chars returns sonnet (haiku threshold)", () => {
+			expect(chooseClaudeModel(3000, 3)).toBe("sonnet");
+		});
+
+		it("2999 chars with 4 iterations returns sonnet (iterations exceed haiku)", () => {
+			expect(chooseClaudeModel(2999, 4)).toBe("sonnet");
+		});
+
+		// Opus boundaries
 		it("12000 chars returns sonnet", () => {
 			expect(chooseClaudeModel(12000, 5)).toBe("sonnet");
 		});

@@ -42,7 +42,7 @@ const EnvSchema = z.object({
   BROWSERBASE_PROJECT_ID: z.string().optional(),
   BROWSERBASE_SESSION_ID: z.string().optional(),
   BROWSERBASE_CONTEXT_ID: z.string().optional(),
-  STAGEHAND_MODEL: z.string().default("gpt-4o"),
+  STAGEHAND_MODEL: z.string().default("gemini-2.5-flash"),
   STAGEHAND_CACHE_DIR: z.string().optional(),
 
   // Claude API (optional - uses Claude Code CLI auth when not set)

@@ -17,7 +17,7 @@ export function detectLlmProvider(config: AppConfig): LLMProvider {
   if (process.env.OPENAI_API_KEY) {
     return "openai";
   }
-  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY) {
     return "google";
   }
   if (process.env.ANTHROPIC_API_KEY || config.claudeApiKey) {
@@ -67,7 +67,8 @@ export async function createStagehandLlmClient(
 
     case "google": {
       const { google } = await import("@ai-sdk/google");
-      return new AISdkClient({ model: google("gemini-2.5-flash") });
+      const modelId = config.stagehandModel ?? "gemini-2.5-flash";
+      return new AISdkClient({ model: google(modelId) });
     }
 
     default:
@@ -92,7 +93,7 @@ export function getLlmModelName(
     case "anthropic":
       return "claude-sonnet-4-20250514";
     case "google":
-      return "gemini-2.5-flash";
+      return config.stagehandModel ?? "gemini-2.5-flash";
     default:
       return "unknown";
   }
