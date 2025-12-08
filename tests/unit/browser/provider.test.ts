@@ -3,7 +3,7 @@ import type { AppConfig } from "../../../src/config";
 
 // Mock the stagehand provider module
 vi.mock("../../../src/browser/stagehand/index", () => {
-	const StagehandProvider = function (this: unknown, _config: AppConfig) {
+	const StagehandProvider = function (this: unknown) {
 		return {
 			providerName: "stagehand" as const,
 			createSession: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock("../../../src/browser/stagehand/index", () => {
 
 // Mock the browser use provider module
 vi.mock("../../../src/browser/browserUseProvider", () => {
-	const BrowserUseProvider = function (this: unknown, _config: AppConfig) {
+	const BrowserUseProvider = function (this: unknown) {
 		return {
 			providerName: "browser-use" as const,
 			createSession: vi.fn(),

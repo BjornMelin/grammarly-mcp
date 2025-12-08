@@ -32,7 +32,8 @@ pnpm test:ci        # CI mode with coverage + JSON reporter
 - Statements: 85%
 
 **Test structure**:
-```
+
+```text
 tests/
 ├── setup.ts              # Global test setup
 ├── unit/                 # Fast, isolated unit tests

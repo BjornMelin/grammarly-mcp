@@ -25,7 +25,7 @@
     "test:ci": "vitest run --coverage --reporter=json --reporter=default"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.53",

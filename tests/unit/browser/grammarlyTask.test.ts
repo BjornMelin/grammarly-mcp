@@ -10,7 +10,6 @@ vi.mock("../../../src/config", () => ({
 const mockSessionsCreateSession = vi.fn();
 const mockTasksCreateTask = vi.fn();
 const mockTaskComplete = vi.fn();
-const mockSessionsDeleteSession = vi.fn();
 
 // Mock BrowserUseClient class
 vi.mock("browser-use-sdk", () => ({

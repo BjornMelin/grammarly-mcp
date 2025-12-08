@@ -96,25 +96,30 @@ export async function runStagehandGrammarlyTask(
     await stagehand.act("Select all text in the editor using Ctrl+A or Cmd+A");
     await sleep(100);
 
-    // Type the text using stagehand's act
-    // For long text, we'll use a different approach - paste via act
+    // Type the text using stagehand's act for short text, or page API for long text
     log("debug", "Typing text into editor");
 
-    // For shorter texts, type directly
+    // For shorter texts, type directly using stagehand
     if (truncatedText.length <= 500) {
       await stagehand.act(`Type the following text exactly: ${truncatedText}`);
     } else {
-      // For longer texts, paste in chunks by focusing and typing
-      const chunks = [];
-      for (let i = 0; i < truncatedText.length; i += 500) {
-        chunks.push(truncatedText.slice(i, i + 500));
-      }
-
-      for (const chunk of chunks) {
-        // Use page.evaluate to input text directly if available
-        await stagehand.act(`Type this text: ${chunk.slice(0, 200)}...`);
-        await sleep(100);
-      }
+      // For longer texts, use clipboard API to paste the full content directly
+      log("debug", "Pasting long text via clipboard API");
+      await page.evaluate(async (textToPaste) => {
+        // Find the contenteditable element (Grammarly editor)
+        const editor = document.querySelector('[contenteditable="true"]');
+        if (editor) {
+          // Use clipboard API for reliable pasting
+          await navigator.clipboard.writeText(textToPaste);
+          // Focus the editor
+          (editor as HTMLElement).focus();
+          // Trigger paste
+          document.execCommand("paste");
+        } else {
+          throw new Error("Could not find contenteditable editor");
+        }
+      }, truncatedText);
+      await sleep(500);
     }
 
     log("debug", "Text pasted into editor");

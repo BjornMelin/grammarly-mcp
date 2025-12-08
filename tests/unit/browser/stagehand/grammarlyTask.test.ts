@@ -18,6 +18,7 @@ vi.stubGlobal(
 // Mock functions at top level
 const mockPageUrl = vi.fn();
 const mockPageGoto = vi.fn();
+const mockPageEvaluate = vi.fn();
 const mockStagehandObserve = vi.fn();
 const mockStagehandAct = vi.fn();
 const mockStagehandExtract = vi.fn();
@@ -27,6 +28,7 @@ function createMockPage(url = "https://other-site.com") {
 	return {
 		url: mockPageUrl.mockReturnValue(url),
 		goto: mockPageGoto,
+		evaluate: mockPageEvaluate,
 	};
 }
 
@@ -55,6 +57,7 @@ describe("runStagehandGrammarlyTask", () => {
 
 		// Default successful mocks
 		mockPageGoto.mockResolvedValue(undefined);
+		mockPageEvaluate.mockResolvedValue(undefined);
 		mockStagehandObserve.mockResolvedValue([{ description: "New document button" }]);
 		mockStagehandAct.mockResolvedValue(undefined);
 		mockStagehandExtract.mockResolvedValue({
@@ -190,19 +193,18 @@ describe("runStagehandGrammarlyTask", () => {
 			expect(directTypeCall).toBeDefined();
 		});
 
-		it("chunks long text for typing (>500 chars)", async () => {
-			const longText = "a".repeat(1200); // Will be split into 3 chunks
-			const stagehand = createMockStagehand([createMockPage("https://app.grammarly.com")]);
+		it("uses page.evaluate for long text (>500 chars)", async () => {
+			const longText = "a".repeat(1200); // Long text triggers clipboard API approach
+			const mockPage = createMockPage("https://app.grammarly.com");
+			const stagehand = createMockStagehand([mockPage]);
 
 			await runStagehandGrammarlyTask(stagehand as unknown as Stagehand, longText);
 
-			// Count "Type this text:" calls (chunk typing pattern)
-			const actCalls = mockStagehandAct.mock.calls;
-			const chunkCalls = actCalls.filter(
-				(call) => typeof call[0] === "string" && call[0].includes("Type this text:")
-			);
-			expect(chunkCalls.length).toBeGreaterThan(1);
+			// Check that page.evaluate was called to paste via clipboard API
+			const evaluateCalls = mockPage.evaluate.mock.calls;
+			expect(evaluateCalls.length).toBeGreaterThan(0);
 		});
+
 	});
 
 	describe("AI detection observation", () => {
