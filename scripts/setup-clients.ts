@@ -16,6 +16,35 @@ import * as dotenv from "dotenv";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+// Minimal logger for the setup script that avoids importing the main server
+// config (which performs strict environment validation and exits early when
+// required keys are missing). This keeps the bootstrap flow working even when
+// the .env file is incomplete.
+const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+type SetupLogLevel = (typeof LOG_LEVELS)[number];
+
+function resolveLogLevel(): SetupLogLevel {
+  const raw = process.env.SETUP_LOG_LEVEL?.toLowerCase();
+
+  if (raw && LOG_LEVELS.includes(raw as SetupLogLevel)) {
+    return raw as SetupLogLevel;
+  }
+
+  return "info";
+}
+
+const configuredLogLevel = resolveLogLevel();
+
+function log(level: SetupLogLevel, message: string, ...extra: unknown[]): void {
+  if (LOG_LEVELS.indexOf(level) < LOG_LEVELS.indexOf(configuredLogLevel)) {
+    return;
+  }
+
+  const prefix = `[setup-clients:${level}]`;
+  const writer = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
+  writer(prefix, message, ...extra);
+}
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -398,25 +427,55 @@ async function selectClients(rl: readline.Interface): Promise<ClientConfig[]> {
   console.log("  a. Configure all clients");
   console.log("  q. Quit\n");
 
-  const answer = await question(
-    rl,
-    "Enter client numbers (comma-separated) or 'a' for all: ",
-  );
+  // Keep prompting until the user provides at least one valid selection
+  while (true) {
+    const answer = await question(
+      rl,
+      "Enter client numbers (comma-separated) or 'a' for all: ",
+    );
 
-  if (answer.toLowerCase() === "q") {
-    return [];
+    if (answer.toLowerCase() === "q") {
+      return [];
+    }
+
+    if (answer.toLowerCase() === "a") {
+      return availableClients;
+    }
+
+    const indices: number[] = [];
+
+    for (const rawToken of answer.split(",")) {
+      const token = rawToken.trim();
+      if (token === "") {
+        log("warn", "Skipping empty selection.");
+        continue;
+      }
+
+      const parsed = parseInt(token, 10);
+      if (Number.isNaN(parsed)) {
+        log("warn", `Skipping invalid number: "${token}"`);
+        continue;
+      }
+
+      const zeroBased = parsed - 1;
+      if (zeroBased < 0 || zeroBased >= availableClients.length) {
+        log(
+          "warn",
+          `Selection out of range (must be 1-${availableClients.length}): "${token}"`,
+        );
+        continue;
+      }
+
+      indices.push(zeroBased);
+    }
+
+    if (indices.length === 0) {
+      log("warn", "No valid selections detected. Please try again.\n");
+      continue;
+    }
+
+    return indices.map((i) => availableClients[i]);
   }
-
-  if (answer.toLowerCase() === "a") {
-    return availableClients;
-  }
-
-  const indices = answer
-    .split(",")
-    .map((s) => parseInt(s.trim(), 10) - 1)
-    .filter((i) => i >= 0 && i < availableClients.length);
-
-  return indices.map((i) => availableClients[i]);
 }
 
 // =============================================================================
@@ -479,25 +538,28 @@ async function main(): Promise<void> {
     const selectedClients = await selectClients(rl);
 
     if (selectedClients.length === 0) {
-      console.log("\nNo clients selected. Exiting.\n");
+      log("info", "No clients selected. Exiting.");
       return;
     }
 
-    console.log(`\nConfiguring ${selectedClients.length} client(s)...\n`);
-    console.log(`Server invocation: ${serverInvocation.command} ${serverInvocation.args.join(" ")}`);
-    console.log(`Note: ${serverInvocation.note}`);
+    log("info", `Configuring ${selectedClients.length} client(s)...`);
+    log(
+      "info",
+      `Server invocation: ${serverInvocation.command} ${serverInvocation.args.join(" ")}`,
+    );
+    log("info", `Note: ${serverInvocation.note}`);
 
     const mcpConfig = buildMcpConfig(serverInvocation, envVars);
 
     for (const client of selectedClients) {
-      console.log(`\n--- ${client.name} ---`);
-      console.log(`Config path: ${client.configPath}`);
+      log("info", `--- ${client.name} ---`);
+      log("info", `Config path: ${client.configPath}`);
 
       try {
         // Backup existing config
         const backupPath = backupFile(client.configPath);
         if (backupPath) {
-          console.log(`Backed up to: ${backupPath}`);
+          log("info", `Backed up to: ${backupPath}`);
         }
 
         // Ensure directory exists
@@ -514,18 +576,19 @@ async function main(): Promise<void> {
         }
 
         fs.writeFileSync(client.configPath, content, "utf-8");
-        console.log("Configuration written successfully!");
+        log("info", "Configuration written successfully!");
       } catch (error) {
-        console.error(
+        log(
+          "error",
           `Error configuring ${client.name}:`,
-          error instanceof Error ? error.message : error,
+          error instanceof Error ? error : String(error),
         );
       }
     }
 
-    console.log("\n=== Setup Complete ===\n");
-    console.log("The grammarly MCP server has been configured for the selected clients.");
-    console.log("Restart your MCP clients to load the new configuration.\n");
+    log("info", "=== Setup Complete ===");
+    log("info", "The grammarly MCP server has been configured for the selected clients.");
+    log("info", "Restart your MCP clients to load the new configuration.");
   } finally {
     rl.close();
   }

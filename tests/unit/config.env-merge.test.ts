@@ -21,6 +21,7 @@ describe("config environment merging", () => {
     );
 
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(tempDir);
+    // Intentionally replace process.env to isolate this test's variables; restored in finally to avoid leaking to other tests.
     process.env = { IGNORE_SYSTEM_ENV: "false" } as NodeJS.ProcessEnv;
 
     vi.resetModules();

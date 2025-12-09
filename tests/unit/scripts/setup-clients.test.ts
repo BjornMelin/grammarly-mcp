@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildMcpConfig,
@@ -13,20 +13,53 @@ import {
 
 const createTempDir = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "setup-clients-"));
 
+describe("module loading", () => {
+  it("does not invoke server config validation on import when env is incomplete", async () => {
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      // Prevent the real exit during the test; TypeScript expects a never return type.
+      .mockImplementation((() => {
+        throw new Error("process.exit called");
+      }) as never);
+
+    const previousEnv = { ...process.env };
+    delete process.env.BROWSER_PROVIDER;
+    delete process.env.BROWSERBASE_API_KEY;
+    delete process.env.BROWSERBASE_PROJECT_ID;
+    delete process.env.BROWSER_USE_API_KEY;
+    delete process.env.BROWSER_USE_PROFILE_ID;
+
+    try {
+      await import("../../../scripts/setup-clients?fresh=" + Date.now());
+
+      expect(exitSpy).not.toHaveBeenCalled();
+    } finally {
+      process.env = previousEnv;
+      exitSpy.mockRestore();
+    }
+  });
+});
+
 describe("parseEnvFile", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = createTempDir();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
   it("parses simple key-value pairs", () => {
-    const dir = createTempDir();
-    const envPath = path.join(dir, ".env");
+    const envPath = path.join(tempDir, ".env");
     fs.writeFileSync(envPath, "FOO=bar\nBAZ=qux\n");
 
     expect(parseEnvFile(envPath)).toEqual({ FOO: "bar", BAZ: "qux" });
-
-    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   it("handles quoted values and skips comments/empty lines", () => {
-    const dir = createTempDir();
-    const envPath = path.join(dir, ".env");
+    const envPath = path.join(tempDir, ".env");
     fs.writeFileSync(
       envPath,
       [
@@ -39,17 +72,12 @@ describe("parseEnvFile", () => {
     );
 
     expect(parseEnvFile(envPath)).toEqual({ QUOTED: "value with spaces", PLAIN: "bare", EMPTY: "" });
-
-    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   it("returns empty object when file is missing", () => {
-    const dir = createTempDir();
-    const envPath = path.join(dir, "absent.env");
+    const envPath = path.join(tempDir, "absent.env");
 
     expect(parseEnvFile(envPath)).toEqual({});
-
-    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -77,6 +105,55 @@ describe("buildMcpConfig", () => {
       BROWSER_USE_PROFILE_ID: "profile-id",
       LOG_LEVEL: "debug",
     });
+  });
+
+  it("omits optional vars when they are not provided", () => {
+    const invocation = { command: "node", args: ["dist/server.js"] } as const;
+    const envVars = {
+      BROWSER_PROVIDER: "stagehand",
+      BROWSERBASE_API_KEY: "base-key",
+      BROWSERBASE_PROJECT_ID: "project-id",
+      BROWSER_USE_API_KEY: "api-key",
+      BROWSER_USE_PROFILE_ID: "profile-id",
+    } as const;
+
+    const result = buildMcpConfig(invocation, envVars);
+
+    expect(result.env).toEqual({
+      BROWSER_PROVIDER: "stagehand",
+      BROWSERBASE_API_KEY: "base-key",
+      BROWSERBASE_PROJECT_ID: "project-id",
+      BROWSER_USE_API_KEY: "api-key",
+      BROWSER_USE_PROFILE_ID: "profile-id",
+    });
+    expect(result.env.LOG_LEVEL).toBeUndefined();
+  });
+
+  it("handles missing required vars by returning an empty env", () => {
+    const invocation = { command: "node", args: ["dist/server.js"] } as const;
+    const envVars = {} as const;
+
+    const result = buildMcpConfig(invocation, envVars);
+
+    expect(result.env).toEqual({});
+  });
+
+  it.each([
+    ["node dist", { command: "node", args: ["dist/server.js"] }],
+    ["npx binary", { command: "npx", args: ["grammarly-mcp-server", "--flag"] }],
+  ])("preserves invocation shape (%s)", (_label, invocation) => {
+    const envVars = {
+      BROWSER_PROVIDER: "stagehand",
+      BROWSERBASE_API_KEY: "base-key",
+      BROWSERBASE_PROJECT_ID: "project-id",
+      BROWSER_USE_API_KEY: "api-key",
+      BROWSER_USE_PROFILE_ID: "profile-id",
+    } as const;
+
+    const result = buildMcpConfig(invocation, envVars);
+
+    expect(result.command).toBe(invocation.command);
+    expect(result.args).toEqual(invocation.args);
   });
 });
 
@@ -175,19 +252,19 @@ describe("filterClientsForPlatform", () => {
     { name: "Client", configPath: "d", format: "json", description: "" },
   ];
 
-  it("excludes macOS-specific entries on linux", () => {
-    const available = filterClientsForPlatform("linux", sampleClients);
-    expect(available.every((c) => !c.name.includes("(macOS)"))).toBe(true);
-  });
+  it.each([
+    ["linux", ["(macOS)"], undefined],
+    ["darwin", ["(Linux)"], undefined],
+    ["win32", ["(Linux)", "(macOS)"], "Client (Windows)"],
+  ])("filters platform-specific clients for %s", (platform, excludedPatterns: string[], expectedAllowed?: string) => {
+    const available = filterClientsForPlatform(platform, sampleClients);
 
-  it("excludes linux entries on darwin", () => {
-    const available = filterClientsForPlatform("darwin", sampleClients);
-    expect(available.every((c) => !c.name.includes("(Linux)"))).toBe(true);
-  });
+    for (const pattern of excludedPatterns) {
+      expect(available.every((c) => !c.name.includes(pattern))).toBe(true);
+    }
 
-  it("excludes both linux and macOS entries on win32", () => {
-    const available = filterClientsForPlatform("win32", sampleClients);
-    expect(available.some((c) => c.name.includes("(Linux)") || c.name.includes("(macOS)"))).toBe(false);
-    expect(available.map((c) => c.name)).toContain("Client (Windows)");
+    if (expectedAllowed) {
+      expect(available.map((c) => c.name)).toContain(expectedAllowed);
+    }
   });
 });
