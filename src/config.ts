@@ -12,28 +12,29 @@ const envPath = path.resolve(process.cwd(), ".env");
 const envFileExists = fs.existsSync(envPath);
 let dotenvConfig: Record<string, string> = {};
 if (envFileExists) {
-  const result = dotenv.config({ path: envPath });
-  if (result.parsed) {
-    dotenvConfig = result.parsed;
-  }
+  // Use dotenv.parse() instead of dotenv.config() to avoid mutating process.env.
+  // This preserves test isolation where tests set process.env values before import.
+  const envContent = fs.readFileSync(envPath, "utf-8");
+  dotenvConfig = dotenv.parse(envContent);
 }
 
-// Determine if we should ignore system env vars (bootstrap from either source)
+// Determine if we should ignore system env vars.
+// Check process.env FIRST so tests can override .env settings.
 const ignoreSystemEnv =
   (
-    dotenvConfig.IGNORE_SYSTEM_ENV ?? process.env.IGNORE_SYSTEM_ENV
+    process.env.IGNORE_SYSTEM_ENV ?? dotenvConfig.IGNORE_SYSTEM_ENV
   )?.toLowerCase() === "true";
 
 if (ignoreSystemEnv && !envFileExists) {
+  // Warn but continue - env vars may be passed via MCP client config
   console.error(
-    "[grammarly-mcp:error] IGNORE_SYSTEM_ENV=true but .env file not found at:",
-    envPath,
+    "[grammarly-mcp:warn] IGNORE_SYSTEM_ENV=true but no .env file found. Using process.env only.",
   );
-  process.exit(1);
 }
 
-// Create the effective environment: either .env-only or merged with process.env
-const effectiveEnv = ignoreSystemEnv ? dotenvConfig : process.env;
+// Create the effective environment: .env-only if available, otherwise process.env
+const effectiveEnv =
+  ignoreSystemEnv && envFileExists ? dotenvConfig : process.env;
 
 // =============================================================================
 // Type Definitions

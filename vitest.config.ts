@@ -12,11 +12,22 @@ export default defineConfig({
 		environment: "node",
 		globals: true,
 
+		// Set environment variables BEFORE any test modules are loaded.
+		// This is critical because config.ts reads LOG_LEVEL at module load time.
+		// Setting these in setupFiles is too late (modules load first).
+		env: {
+			// Ensure tests use process.env, not .env file values
+			IGNORE_SYSTEM_ENV: "false",
+			BROWSER_PROVIDER: "stagehand",
+			BROWSERBASE_API_KEY: "test-api-key",
+			BROWSERBASE_PROJECT_ID: "test-project-id",
+			BROWSER_USE_API_KEY: "test-browser-use-key",
+			BROWSER_USE_PROFILE_ID: "test-profile-id",
+			LOG_LEVEL: "error",
+		},
+
 		// Pool configuration: threads for fast parallel execution
 		pool: "threads",
-		poolOptions: {
-			threads: { singleThread: false },
-		},
 
 		// Timeouts
 		testTimeout: 5000,

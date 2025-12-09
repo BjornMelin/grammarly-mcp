@@ -22,7 +22,8 @@
     "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration --pool=forks",
-    "test:ci": "vitest run --coverage --reporter=json --reporter=default"
+    "test:ci": "vitest run --coverage --reporter=json --reporter=default",
+    "setup-clients": "npx tsx scripts/setup-clients.ts"
   },
   "engines": {
     "node": ">=18.0.0"
