@@ -106,7 +106,7 @@ async function main(): Promise<void> {
     {
       title: "Grammarly Text Optimizer",
       description:
-        "Get AI detection and plagiarism scores from Grammarly, optionally rewriting text with Claude to reduce scores. " +
+        "Get AI detection and plagiarism scores from Grammarly, optionally rewriting text with the configured LLM to reduce scores. " +
         "Modes: 'score_only' (scores only), 'analyze' (scores + recommendations), 'optimize' (iterative rewriting to meet thresholds).",
       inputSchema: ToolInputSchema,
       outputSchema: ToolOutputSchema,
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
         readOnlyHint: false, // Tool can rewrite text
         destructiveHint: false, // Non-destructive (original preserved in input)
         idempotentHint: false, // Each run may produce different results
-        openWorldHint: true, // Interacts with Grammarly and Claude APIs
+        openWorldHint: true, // Interacts with Grammarly and external LLM APIs
       },
     },
     async (args, extra) => {

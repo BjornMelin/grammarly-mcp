@@ -19,7 +19,9 @@ export const ToolInputSchema = z.object({
   mode: z
     .enum(["score_only", "optimize", "analyze"])
     .default("optimize")
-    .describe("Operation mode."),
+    .describe(
+      "score_only gets scores, analyze interprets them, optimize rewrites to meet thresholds.",
+    ),
   max_ai_percent: z
     .number()
     .min(0)

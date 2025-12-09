@@ -221,7 +221,7 @@ export async function rewriteText(
     "- Add citations or references that do not exist in the original.",
     "- Fabricate sources or numeric data.",
     "- Change code blocks, inline code, or math expressions other than trivial formatting.",
-    "- Use emdashes (—) or emojis in the rewritten text.",
+    "- Use em dashes (—) or emojis in the rewritten text.",
     "Examples of what NOT to change:",
     "- Code block (delimited by triple backticks):",
     "  ```js",
