@@ -34,8 +34,8 @@ export type BrowserUseLlm = z.infer<typeof BrowserUseLlmSchema>;
 
 /** Options for creating a Grammarly session */
 export interface GrammarlySessionOptions {
-  /** ISO 3166-1 alpha-2 country code for proxy (e.g., 'us', 'gb'). 240+ countries supported. */
-  proxyCountryCode?: string | null;
+  /** ISO 3166-1 alpha-2 country code for proxy (e.g., 'US', 'GB'). 240+ countries supported. */
+  proxyCountry?: string | null;
 }
 
 /** Result from creating a Grammarly session */
@@ -194,15 +194,15 @@ export async function createGrammarlySession(
     );
   }
   log("debug", "Creating Browser Use session with synced profile", {
-    proxyCountryCode: options?.proxyCountryCode,
+    proxyCountry: options?.proxyCountry,
   });
   try {
     const session = await client.sessions.createSession({
       profileId: appConfig.browserUseProfileId,
       // Pre-navigate to Grammarly for faster task execution
       startUrl: "https://app.grammarly.com",
-      // Optional proxy for geo-routing
-      proxyCountryCode: options?.proxyCountryCode as
+      // Optional proxy for geo-routing (Browser Use SDK expects proxyCountryCode)
+      proxyCountryCode: options?.proxyCountry as
         | BrowserUse.ProxyCountryCode
         | undefined,
     });

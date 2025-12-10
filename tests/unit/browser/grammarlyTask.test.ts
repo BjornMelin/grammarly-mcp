@@ -118,19 +118,20 @@ describe("createGrammarlySession", () => {
     expect(result.liveUrl).toBe("https://live.browseruse.com/session-123");
   });
 
-  it("passes proxy country code when provided", async () => {
+  it("passes proxy country when provided", async () => {
     mockSessionsCreateSession.mockResolvedValue({
       id: "session-456",
       liveUrl: null,
     });
 
     await createGrammarlySession(client, baseConfig, {
-      proxyCountryCode: "us",
+      proxyCountry: "US",
     });
 
+    // Browser Use SDK expects proxyCountryCode internally
     expect(mockSessionsCreateSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        proxyCountryCode: "us",
+        proxyCountryCode: "US",
       })
     );
   });

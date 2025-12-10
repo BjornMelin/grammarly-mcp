@@ -4,10 +4,76 @@ import { GrammarlyExtractSchema } from "./schemas";
 
 const MAX_TEXT_LENGTH = 8000;
 
+/**
+ * Error thrown when Grammarly authentication is required.
+ * Contains the debug URL for manual login.
+ */
+export class GrammarlyAuthError extends Error {
+  readonly debugUrl: string | undefined;
+
+  constructor(message: string, debugUrl?: string) {
+    super(message);
+    this.name = "GrammarlyAuthError";
+    this.debugUrl = debugUrl;
+  }
+}
+
+/**
+ * Check if user is logged into Grammarly.
+ * Uses URL check and observe() pattern for reliable detection.
+ */
+export async function checkGrammarlyAuthStatus(
+  stagehand: Stagehand,
+): Promise<{ loggedIn: boolean; currentUrl: string }> {
+  const page = stagehand.context.pages()[0];
+  if (!page) {
+    throw new Error("No page found in browser context; session may be broken");
+  }
+
+  const currentUrl = page.url();
+
+  // Quick URL check first - login/signin pages indicate not authenticated
+  if (
+    currentUrl.includes("/signin") ||
+    currentUrl.includes("/login") ||
+    currentUrl.includes("/signup")
+  ) {
+    log("debug", "Auth check: detected login page URL", { currentUrl });
+    return { loggedIn: false, currentUrl };
+  }
+
+  // If already on app.grammarly.com, use observe to find auth indicators
+  if (currentUrl.includes("app.grammarly.com")) {
+    try {
+      const authIndicators = await stagehand.observe(
+        "Find user profile avatar, account menu, user email, or sign-out option that indicates logged-in state",
+      );
+
+      const loggedIn = authIndicators.length > 0;
+      log("debug", "Auth check: observe result", {
+        loggedIn,
+        indicatorsFound: authIndicators.length,
+      });
+
+      return { loggedIn, currentUrl };
+    } catch (error) {
+      log("debug", "Auth check: observe failed, assuming not logged in", {
+        error,
+      });
+      return { loggedIn: false, currentUrl };
+    }
+  }
+
+  // Not on Grammarly yet, can't determine auth status
+  return { loggedIn: false, currentUrl };
+}
+
 export interface GrammarlyTaskOptions {
   maxSteps?: number;
   iteration?: number;
   mode?: string;
+  /** Debug URL for auth error messages */
+  debugUrl?: string;
 }
 
 export interface GrammarlyTaskResult {
@@ -58,6 +124,20 @@ export async function runStagehandGrammarlyTask(
         waitUntil: "networkidle",
       });
       await page.waitForLoadState("domcontentloaded");
+    }
+
+    // Step 1.5: Verify authentication status
+    const authStatus = await checkGrammarlyAuthStatus(stagehand);
+    if (!authStatus.loggedIn) {
+      const debugUrl = options?.debugUrl;
+      const message = debugUrl
+        ? `Grammarly login required. Open this URL to authenticate: ${debugUrl}`
+        : "Grammarly login required. Set BROWSERBASE_CONTEXT_ID after logging in via debug URL.";
+      log("warn", "Grammarly auth check failed", {
+        currentUrl: authStatus.currentUrl,
+        debugUrl,
+      });
+      throw new GrammarlyAuthError(message, debugUrl);
     }
 
     // Step 2: Create a new document using observe -> act pattern
@@ -173,6 +253,11 @@ export async function runStagehandGrammarlyTask(
       notes: extractResult.notes,
     };
   } catch (error) {
+    // Re-throw authentication errors immediately without fallback
+    if (error instanceof GrammarlyAuthError) {
+      throw error;
+    }
+
     log("error", "Stagehand Grammarly task failed", { error });
 
     // Try to extract whatever we can see

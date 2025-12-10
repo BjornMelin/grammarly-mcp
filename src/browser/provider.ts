@@ -3,9 +3,33 @@ import type { GrammarlyScores } from "./grammarlyTask";
 
 /**
  * Options for creating a browser session.
+ * Matches the output of getSessionOptions() from config.ts.
  */
 export interface SessionOptions {
-  proxyCountryCode?: string | null;
+  /** Enable stealth mode (level !== 'none') */
+  stealth?: boolean;
+  /** Enable advanced stealth (Browserbase Scale plan feature) */
+  advancedStealth?: boolean;
+  /** Block ads for faster loading */
+  blockAds?: boolean;
+  /** Auto-solve CAPTCHAs */
+  solveCaptchas?: boolean;
+  /** Browser viewport dimensions */
+  viewport?: { width: number; height: number };
+  /** Proxy country code (ISO 3166-1 alpha-2, uppercase) */
+  proxyCountry?: string;
+  /** Whether proxy is enabled */
+  proxyEnabled?: boolean;
+
+  // === BYOP (Bring Your Own Proxy) fields ===
+  /** Proxy type: "browserbase" (built-in) | "external" (BYOP) */
+  proxyType?: "browserbase" | "external";
+  /** External proxy server URL, e.g., "http://geo.iproyal.com:12321" */
+  proxyServer?: string;
+  /** Proxy authentication username */
+  proxyUsername?: string;
+  /** Proxy authentication password (with IPRoyal params if applicable) */
+  proxyPassword?: string;
 }
 
 /**
@@ -15,6 +39,10 @@ export interface SessionResult {
   sessionId: string;
   liveUrl: string | null;
   contextId?: string;
+  /** True when fresh context needs manual Grammarly login */
+  needsLogin?: boolean;
+  /** Debug URL for manual browser intervention */
+  debugUrl?: string;
 }
 
 /**

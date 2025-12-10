@@ -39,7 +39,7 @@ export class BrowserUseProvider implements BrowserProvider {
 
     const client = this.getClient();
     const result = await createGrammarlySession(client, this.config, {
-      proxyCountryCode: options?.proxyCountryCode,
+      proxyCountry: options?.proxyCountry,
     });
 
     this.activeSessions.set(result.sessionId, result.liveUrl);

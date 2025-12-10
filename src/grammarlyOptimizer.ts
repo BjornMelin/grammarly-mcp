@@ -6,7 +6,7 @@ import {
   type GrammarlyScoreResult,
 } from "./browser/provider";
 import type { AppConfig } from "./config";
-import { log } from "./config";
+import { getSessionOptions, log } from "./config";
 import {
   analyzeText,
   RewriterToneSchema,
@@ -56,11 +56,6 @@ export const ToolInputSchema = z.object({
     .describe(
       "Extra constraints (e.g., preserve citations, do not change code blocks).",
     ),
-  proxy_country_code: z
-    .string()
-    .length(2)
-    .optional()
-    .describe("ISO 3166-1 alpha-2 country code for proxy (e.g., 'us', 'gb')."),
   response_format: z
     .enum(["json", "markdown"])
     .default("json")
@@ -118,6 +113,17 @@ export const ToolOutputSchema: ZodType<StructuredContent> = z.object({
     .string()
     .optional()
     .describe("Browser automation provider used (stagehand or browser-use)."),
+  stealth_used: z
+    .boolean()
+    .optional()
+    .describe("Whether stealth mode was enabled."),
+  proxy_used: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      "Proxy country used (ISO 3166-1 alpha-2), or null if not enabled.",
+    ),
 });
 
 /** Callback for MCP progress notifications during optimization (0-100%). */
@@ -130,6 +136,13 @@ export type GrammarlyOptimizeMode = "score_only" | "optimize" | "analyze";
 
 export type GrammarlyOptimizeInput = z.infer<typeof ToolInputSchema>;
 
+/**
+ * History entry for Grammarly optimization iterations.
+ *
+ * @property iteration - Iteration number, starting from 0.
+ *   Negative values (e.g., -1) are reserved for system/meta messages such as login guidance.
+ *   Parsers and consumers should treat negative iterations as non-optimization entries.
+ */
 export interface HistoryEntry {
   iteration: number;
   ai_detection_percent: number | null;
@@ -147,6 +160,8 @@ export interface GrammarlyOptimizeResult {
   notes: string;
   live_url: string | null;
   provider?: string;
+  stealth_used?: boolean;
+  proxy_used?: string | null;
 }
 
 /** @internal Exported for testing */
@@ -248,9 +263,11 @@ export async function runGrammarlyOptimization(
     tone,
     domain_hint,
     custom_instructions,
-    proxy_country_code,
     max_steps,
   } = input;
+
+  // Get session options from env config
+  const sessionOptions = getSessionOptions(appConfig);
 
   const history: HistoryEntry[] = [];
 
@@ -286,10 +303,7 @@ export async function runGrammarlyOptimization(
 
     // Create session with retry logic
     const sessionResult = await withRetry(
-      () =>
-        activeProvider.createSession({
-          proxyCountryCode: proxy_country_code,
-        }),
+      () => activeProvider.createSession(sessionOptions),
       { maxRetries: 3, backoffMs: 1000, label: "createSession" },
     );
 
@@ -300,7 +314,20 @@ export async function runGrammarlyOptimization(
       sessionId,
       liveUrl,
       provider: activeProvider.providerName,
+      needsLogin: sessionResult.needsLogin,
     });
+
+    // Surface login guidance for fresh contexts
+    if (sessionResult.needsLogin) {
+      const loginUrl = sessionResult.debugUrl ?? liveUrl;
+      log("info", "New context requires Grammarly login", { loginUrl });
+      history.push({
+        iteration: -1,
+        ai_detection_percent: null,
+        plagiarism_percent: null,
+        note: `Login required: Open ${loginUrl} to authenticate with Grammarly. After logging in, set BROWSERBASE_CONTEXT_ID=${sessionResult.contextId ?? "your-context-id"} in your .env file.`,
+      });
+    }
 
     // Capture sessionId as a const for use in closures (TypeScript narrowing)
     const activeSessionId = sessionId;
@@ -351,6 +378,8 @@ export async function runGrammarlyOptimization(
         notes,
         live_url: liveUrl,
         provider: activeProvider.providerName,
+        stealth_used: sessionOptions.stealth,
+        proxy_used: sessionOptions.proxyCountry ?? null,
       };
     }
 
@@ -386,6 +415,8 @@ export async function runGrammarlyOptimization(
         notes: analysis,
         live_url: liveUrl,
         provider: activeProvider.providerName,
+        stealth_used: sessionOptions.stealth,
+        proxy_used: sessionOptions.proxyCountry ?? null,
       };
     }
 
@@ -502,6 +533,8 @@ export async function runGrammarlyOptimization(
       notes,
       live_url: liveUrl,
       provider: activeProvider.providerName,
+      stealth_used: sessionOptions.stealth,
+      proxy_used: sessionOptions.proxyCountry ?? null,
     };
   } finally {
     // Cleanup session

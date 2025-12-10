@@ -1,6 +1,41 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { AppConfig } from "../../../src/config";
-import { detectLlmProvider, getLlmModelName } from "../../../src/llm/stagehandLlm";
+import { detectLlmProvider, getLlmModelName, createStagehandLlmClient } from "../../../src/llm/stagehandLlm";
+
+// Mock model functions
+const mockClaudeCodeModel = vi.fn();
+const mockOpenaiModel = vi.fn();
+const mockAnthropicModel = vi.fn();
+const mockGoogleModel = vi.fn();
+
+// Mock AISdkClient class
+class MockAISdkClient {
+	model: unknown;
+	constructor(opts: { model: unknown }) {
+		this.model = opts.model;
+	}
+}
+
+// Mock dynamic imports
+vi.mock("@browserbasehq/stagehand", () => ({
+	AISdkClient: MockAISdkClient,
+}));
+
+vi.mock("ai-sdk-provider-claude-code", () => ({
+	claudeCode: (modelId: string) => mockClaudeCodeModel(modelId),
+}));
+
+vi.mock("@ai-sdk/openai", () => ({
+	openai: (model: string) => mockOpenaiModel(model),
+}));
+
+vi.mock("@ai-sdk/anthropic", () => ({
+	anthropic: (model: string) => mockAnthropicModel(model),
+}));
+
+vi.mock("@ai-sdk/google", () => ({
+	google: (model: string) => mockGoogleModel(model),
+}));
 
 // Base test config - all fields explicitly set for test isolation
 const baseConfig: AppConfig = {
@@ -31,6 +66,8 @@ const baseConfig: AppConfig = {
 	defaultMaxAiPercent: 10,
 	defaultMaxPlagiarismPercent: 5,
 	defaultMaxIterations: 5,
+	proxyConfig: null,
+	stealthConfig: null,
 };
 
 describe("detectLlmProvider", () => {
@@ -162,6 +199,198 @@ describe("getLlmModelName", () => {
 		it("returns unknown for unrecognized provider", () => {
 			// @ts-expect-error Testing invalid provider
 			expect(getLlmModelName(baseConfig, "invalid")).toBe("unknown");
+		});
+	});
+});
+
+describe("createStagehandLlmClient", () => {
+	beforeEach(() => {
+		// Set up mock return values (resetAllMocks() runs in afterEach for cleanup)
+		mockClaudeCodeModel.mockReturnValue({ id: "claude-code-model" });
+		mockOpenaiModel.mockReturnValue({ id: "openai-model" });
+		mockAnthropicModel.mockReturnValue({ id: "anthropic-model" });
+		mockGoogleModel.mockReturnValue({ id: "google-model" });
+	});
+
+	afterEach(() => {
+		vi.resetAllMocks();
+	});
+
+	describe("claude-code provider", () => {
+		it("creates client with claude-code provider using sonnet for auto model", async () => {
+			const config = { ...baseConfig, stagehandLlmProvider: "claude-code" as const };
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockClaudeCodeModel).toHaveBeenCalledWith("sonnet");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "claude-code-model" });
+		});
+
+		it("creates client with explicit haiku model", async () => {
+			const config = {
+				...baseConfig,
+				stagehandLlmProvider: "claude-code" as const,
+				claudeModel: "haiku" as const,
+			};
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockClaudeCodeModel).toHaveBeenCalledWith("haiku");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "claude-code-model" });
+		});
+
+		it("creates client with explicit opus model", async () => {
+			const config = {
+				...baseConfig,
+				stagehandLlmProvider: "claude-code" as const,
+				claudeModel: "opus" as const,
+			};
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockClaudeCodeModel).toHaveBeenCalledWith("opus");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "claude-code-model" });
+		});
+	});
+
+	describe("openai provider", () => {
+		it("creates client with openai provider", async () => {
+			const config = { ...baseConfig, stagehandLlmProvider: "openai" as const };
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockOpenaiModel).toHaveBeenCalledWith("gpt-4o");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "openai-model" });
+		});
+
+		it("creates client with custom openai model", async () => {
+			const config = {
+				...baseConfig,
+				stagehandLlmProvider: "openai" as const,
+				openaiModel: "gpt-4-turbo",
+			};
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockOpenaiModel).toHaveBeenCalledWith("gpt-4-turbo");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "openai-model" });
+		});
+	});
+
+	describe("anthropic provider", () => {
+		it("creates client with anthropic provider", async () => {
+			const config = { ...baseConfig, stagehandLlmProvider: "anthropic" as const };
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockAnthropicModel).toHaveBeenCalledWith("claude-sonnet-4-20250514");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "anthropic-model" });
+		});
+
+		it("creates client with custom anthropic model", async () => {
+			const config = {
+				...baseConfig,
+				stagehandLlmProvider: "anthropic" as const,
+				anthropicModel: "claude-opus-4-20250514",
+			};
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockAnthropicModel).toHaveBeenCalledWith("claude-opus-4-20250514");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "anthropic-model" });
+		});
+	});
+
+	describe("google provider", () => {
+		it("creates client with google provider", async () => {
+			const config = { ...baseConfig, stagehandLlmProvider: "google" as const };
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockGoogleModel).toHaveBeenCalledWith("gemini-2.5-flash");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "google-model" });
+		});
+
+		it("creates client with custom google model", async () => {
+			const config = {
+				...baseConfig,
+				stagehandLlmProvider: "google" as const,
+				googleModel: "gemini-2.5-flash-lite",
+			};
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockGoogleModel).toHaveBeenCalledWith("gemini-2.5-flash-lite");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "google-model" });
+		});
+	});
+
+	describe("preferredProvider parameter", () => {
+		it("uses preferredProvider when explicitly passed", async () => {
+			// Config would auto-detect claude-code, but we override with openai
+			const config = { ...baseConfig };
+			const client = await createStagehandLlmClient(config, "openai");
+
+			expect(mockOpenaiModel).toHaveBeenCalledWith("gpt-4o");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "openai-model" });
+		});
+
+		it("prefers explicit preferredProvider over config stagehandLlmProvider", async () => {
+			const config = { ...baseConfig, stagehandLlmProvider: "google" as const };
+			const client = await createStagehandLlmClient(config, "anthropic");
+
+			expect(mockAnthropicModel).toHaveBeenCalledWith("claude-sonnet-4-20250514");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "anthropic-model" });
+		});
+	});
+
+	describe("error handling", () => {
+		it("throws error for unknown provider", async () => {
+			const config = { ...baseConfig };
+			// @ts-expect-error Testing invalid provider
+			await expect(createStagehandLlmClient(config, "invalid-provider")).rejects.toThrow(
+				"Unknown LLM provider: invalid-provider"
+			);
+		});
+	});
+
+	describe("auto-detection", () => {
+		it("auto-detects claude-code when no API keys or explicit provider", async () => {
+			const config = { ...baseConfig };
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockClaudeCodeModel).toHaveBeenCalledWith("sonnet");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "claude-code-model" });
+		});
+
+		it("auto-detects openai when openaiApiKey is set", async () => {
+			const config = { ...baseConfig, openaiApiKey: "sk-test" };
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockOpenaiModel).toHaveBeenCalledWith("gpt-4o");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "openai-model" });
+		});
+
+		it("auto-detects google when googleApiKey is set", async () => {
+			const config = { ...baseConfig, googleApiKey: "google-key" };
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockGoogleModel).toHaveBeenCalledWith("gemini-2.5-flash");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "google-model" });
+		});
+
+		it("auto-detects anthropic when anthropicApiKey is set", async () => {
+			const config = { ...baseConfig, anthropicApiKey: "sk-ant-test" };
+			const client = await createStagehandLlmClient(config);
+
+			expect(mockAnthropicModel).toHaveBeenCalledWith("claude-sonnet-4-20250514");
+			expect(client).toBeInstanceOf(MockAISdkClient);
+			expect(client.model).toEqual({ id: "anthropic-model" });
 		});
 	});
 });

@@ -258,6 +258,74 @@ If not set, auto-detects from API keys (priority: OpenAI > Google > Anthropic > 
 | `LLM_REQUEST_TIMEOUT_MS` | No | `120000` | LLM request timeout (ms). `CLAUDE_REQUEST_TIMEOUT_MS` is still accepted for compatibility. |
 | `CONNECT_TIMEOUT_MS` | No | `30000` | MCP connection timeout (ms) |
 
+### Proxy and Stealth Configuration
+
+Configure browser proxy and stealth settings via JSON environment variables:
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `PROXY_CONFIG` | No | JSON proxy configuration. See schema below. |
+| `STEALTH_CONFIG` | No | JSON stealth configuration. See schema below. |
+
+**PROXY_CONFIG Schema:**
+
+```json
+{
+  "enabled": true,
+  "type": "browserbase",
+  "country": "US",
+  "server": "http://proxy.example.com:8080",
+  "username": "proxy_user",
+  "password": "proxy_pass",
+  "sessionId": "abc12345",
+  "sessionLifetime": "30m"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `enabled` | boolean | Enable/disable proxy (default: `true`) |
+| `type` | string | `"browserbase"` (built-in) or `"external"` (BYOP) |
+| `country` | string | ISO 3166-1 alpha-2 country code (e.g., `"US"`, `"GB"`) |
+| `server` | string | External proxy server URL (required for `type: "external"`) |
+| `username` | string | Proxy authentication username |
+| `password` | string | Proxy authentication password |
+| `sessionId` | string | IPRoyal sticky session ID (8 alphanumeric chars) |
+| `sessionLifetime` | string | Session duration: `"10m"`, `"1h"`, `"1d"`, etc. |
+
+**STEALTH_CONFIG Schema:**
+
+```json
+{
+  "level": "basic",
+  "blockAds": true,
+  "solveCaptchas": true,
+  "viewport": "1920x1080"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `level` | string | `"none"`, `"basic"` (default), or `"advanced"` |
+| `blockAds` | boolean | Block ads (default: `true` for basic/advanced) |
+| `solveCaptchas` | boolean | Auto-solve CAPTCHAs (default: `true`) |
+| `viewport` | string | Browser viewport as `"WIDTHxHEIGHT"` |
+
+**Examples:**
+
+```bash
+# Browserbase built-in proxy (US location)
+PROXY_CONFIG='{"type":"browserbase","country":"US"}'
+
+# External proxy with IPRoyal (BYOP)
+PROXY_CONFIG='{"type":"external","server":"http://geo.iproyal.com:12321","username":"user","password":"pass","country":"US"}'
+
+# Advanced stealth mode
+STEALTH_CONFIG='{"level":"advanced"}'
+```
+
+> **Note:** Advanced stealth level requires Browserbase Scale plan.
+
 ---
 
 ## Running the Server
@@ -603,7 +671,6 @@ Gemini for browser automation (fast), Claude for rewriting (quality):
 | `tone` | enum | `neutral` | `neutral`, `formal`, `informal`, `academic`, `custom` |
 | `domain_hint` | string | — | Domain context (e.g., "legal", "medical") |
 | `custom_instructions` | string | — | Additional rewriting instructions |
-| `proxy_country_code` | string | — | ISO 3166-1 alpha-2 country code for geo-routing |
 | `response_format` | enum | `json` | `json` or `markdown` |
 | `max_steps` | number | `25` | Maximum browser automation steps (5-100) |
 
@@ -626,9 +693,16 @@ Gemini for browser automation (fast), Claude for rewriting (quality):
   ],
   "notes": "string",
   "live_url": "string | null",
-  "provider": "string"
+  "provider": "string",
+  "stealth_used": "boolean",
+  "proxy_used": "string | null"
 }
 ```
+
+| Field | Description |
+| --- | --- |
+| `stealth_used` | Whether stealth mode was enabled for the session |
+| `proxy_used` | Proxy country code used (ISO 3166-1 alpha-2), or `null` if disabled |
 
 ### LLM Configuration
 

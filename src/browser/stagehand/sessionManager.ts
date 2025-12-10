@@ -7,7 +7,28 @@ export interface SessionInfo {
   contextId?: string;
   liveUrl?: string;
   status?: string;
+  /** True when fresh context needs manual Grammarly login */
+  needsLogin?: boolean;
+  /** Debug URL for manual browser intervention */
+  debugUrl?: string;
 }
+
+/** Browserbase built-in proxy with geolocation */
+type BrowserbaseProxy = {
+  type: "browserbase";
+  geolocation: { country: string };
+};
+
+/** External proxy (BYOP) configuration */
+type ExternalProxy = {
+  type: "external";
+  server: string;
+  username?: string;
+  password?: string;
+};
+
+/** Proxy configuration result: array of proxy configs, generic true, or undefined if disabled */
+type ProxyConfig = Array<BrowserbaseProxy | ExternalProxy> | true | undefined;
 
 /**
  * Manages Browserbase sessions and contexts for persistent login state.
@@ -69,10 +90,24 @@ export class BrowserbaseSessionManager {
 
   /**
    * Get or create a Browserbase session with optional context for login persistence.
+   * Accepts stealth and proxy options from getSessionOptions().
    */
   async getOrCreateSession(options?: {
     contextId?: string;
     forceNew?: boolean;
+    // Stealth options
+    advancedStealth?: boolean;
+    blockAds?: boolean;
+    solveCaptchas?: boolean;
+    viewport?: { width: number; height: number };
+    // Proxy options (built-in)
+    proxyCountry?: string;
+    proxyEnabled?: boolean;
+    // BYOP (Bring Your Own Proxy) options
+    proxyType?: "browserbase" | "external";
+    proxyServer?: string;
+    proxyUsername?: string;
+    proxyPassword?: string;
   }): Promise<SessionInfo> {
     // Try to reuse existing session if valid
     if (!options?.forceNew && this.cachedSessionId) {
@@ -89,18 +124,30 @@ export class BrowserbaseSessionManager {
       log("debug", "Cached session expired, creating new one");
     }
 
-    const contextId = options?.contextId ?? this.cachedContextId ?? undefined;
+    // Determine context: use provided, cached, or auto-create new one
+    let contextId = options?.contextId ?? this.cachedContextId ?? undefined;
+    let needsLogin = false;
 
-    // Build session create params
+    // Auto-create context if none available (first-time setup)
+    if (!contextId) {
+      log("info", "No context ID available, creating new persistent context");
+      contextId = await this.createContext();
+      needsLogin = true; // Fresh context has no auth
+    }
+
+    // Build proxy configuration (supports both built-in and external proxies)
+    const proxies = this.buildProxyConfig(options);
+
+    // Build session create params with configurable stealth settings
+    // Default advancedStealth to false since it requires Browserbase Scale plan
     const createParams: Parameters<typeof this.bb.sessions.create>[0] = {
       projectId: this.projectId,
+      ...(proxies && { proxies }),
       browserSettings: {
-        // Advanced stealth mode to avoid detection
-        advancedStealth: true,
-        // Auto-solve CAPTCHAs
-        solveCaptchas: true,
-        // Block ads for faster loading
-        blockAds: true,
+        advancedStealth: options?.advancedStealth ?? false,
+        solveCaptchas: options?.solveCaptchas ?? true,
+        blockAds: options?.blockAds ?? true,
+        ...(options?.viewport && { viewport: options.viewport }),
       },
     };
 
@@ -111,6 +158,15 @@ export class BrowserbaseSessionManager {
         context: { id: contextId, persist: true },
       };
     }
+
+    log("debug", "Creating Browserbase session", {
+      proxyEnabled: options?.proxyEnabled,
+      proxyType: options?.proxyType ?? "browserbase",
+      proxyCountry: options?.proxyCountry,
+      proxyServer: options?.proxyServer ? "[external]" : undefined,
+      advancedStealth: createParams.browserSettings?.advancedStealth,
+      viewport: options?.viewport,
+    });
 
     // Create new session
     const session = await this.bb.sessions.create(createParams);
@@ -124,15 +180,22 @@ export class BrowserbaseSessionManager {
       this.cachedContextId = newContextId;
     }
 
+    // Fetch debug URL for manual intervention
+    const debugUrl = await this.getDebugUrl(session.id);
+
     log("info", "Created Browserbase session", {
       sessionId: session.id,
       contextId: newContextId,
+      needsLogin,
+      debugUrl,
     });
 
     return {
       sessionId: session.id,
       contextId: newContextId,
       status: session.status,
+      needsLogin,
+      debugUrl: debugUrl ?? undefined,
     };
   }
 
@@ -186,5 +249,62 @@ export class BrowserbaseSessionManager {
       log("debug", "Failed to get debug URL", { sessionId, error });
       return null;
     }
+  }
+
+  /**
+   * Build Browserbase proxy configuration from options.
+   * Supports both built-in geolocation proxies and external (BYOP) proxies.
+   *
+   * @returns Proxy config array for Browserbase API, true for generic proxy, or undefined if disabled
+   */
+  private buildProxyConfig(options?: {
+    proxyEnabled?: boolean;
+    proxyType?: "browserbase" | "external";
+    proxyCountry?: string;
+    proxyServer?: string;
+    proxyUsername?: string;
+    proxyPassword?: string;
+  }): ProxyConfig {
+    if (!options?.proxyEnabled) {
+      return undefined;
+    }
+
+    // External proxy (BYOP) - use IPRoyal or other external proxy
+    if (options.proxyType === "external") {
+      if (!options.proxyServer) {
+        throw new Error(
+          "proxyType='external' requires proxyServer to be set; configuration is missing",
+        );
+      }
+      log("debug", "Using external proxy (BYOP)", {
+        server: options.proxyServer,
+        username: options.proxyUsername ? "***" : undefined,
+      });
+      return [
+        {
+          type: "external" as const,
+          server: options.proxyServer,
+          username: options.proxyUsername,
+          password: options.proxyPassword,
+        },
+      ];
+    }
+
+    // Browserbase built-in proxy with geolocation
+    if (options.proxyCountry) {
+      log("debug", "Using Browserbase geolocation proxy", {
+        country: options.proxyCountry,
+      });
+      return [
+        {
+          type: "browserbase" as const,
+          geolocation: { country: options.proxyCountry },
+        },
+      ];
+    }
+
+    // Generic proxy without geolocation (Browserbase selects automatically)
+    log("debug", "Using generic Browserbase proxy");
+    return true;
   }
 }

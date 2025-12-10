@@ -12,7 +12,7 @@ import type {
   SessionOptions,
   SessionResult,
 } from "../provider";
-import { runStagehandGrammarlyTask } from "./grammarlyTask";
+import { GrammarlyAuthError, runStagehandGrammarlyTask } from "./grammarlyTask";
 import { BrowserbaseSessionManager } from "./sessionManager";
 
 /**
@@ -24,6 +24,7 @@ export class StagehandProvider implements BrowserProvider {
   private readonly config: AppConfig;
   private readonly sessionManager: BrowserbaseSessionManager;
   private stagehandInstances: Map<string, Stagehand> = new Map();
+  private sessionDebugUrls: Map<string, string> = new Map();
 
   constructor(config: AppConfig) {
     this.config = config;
@@ -33,9 +34,20 @@ export class StagehandProvider implements BrowserProvider {
   async createSession(options?: SessionOptions): Promise<SessionResult> {
     log("debug", "StagehandProvider: Creating session", options);
 
-    // Get or create a Browserbase session
+    // Get or create a Browserbase session with stealth and proxy options
     const sessionInfo = await this.sessionManager.getOrCreateSession({
       contextId: this.config.browserbaseContextId ?? undefined,
+      advancedStealth: options?.advancedStealth,
+      blockAds: options?.blockAds,
+      solveCaptchas: options?.solveCaptchas,
+      viewport: options?.viewport,
+      proxyEnabled: options?.proxyEnabled,
+      // Only pass proxy fields if proxy is enabled
+      proxyCountry: options?.proxyEnabled ? options?.proxyCountry : undefined,
+      proxyType: options?.proxyEnabled ? options?.proxyType : undefined,
+      proxyServer: options?.proxyEnabled ? options?.proxyServer : undefined,
+      proxyUsername: options?.proxyEnabled ? options?.proxyUsername : undefined,
+      proxyPassword: options?.proxyEnabled ? options?.proxyPassword : undefined,
     });
 
     let stagehand: Stagehand;
@@ -52,14 +64,20 @@ export class StagehandProvider implements BrowserProvider {
       throw error;
     }
 
-    // Get live URL for debugging
-    const liveUrl = await this.sessionManager.getDebugUrl(
-      sessionInfo.sessionId,
-    );
+    // Get live URL for debugging (prefer sessionInfo.debugUrl since it's already fetched)
+    const liveUrl =
+      sessionInfo.debugUrl ??
+      (await this.sessionManager.getDebugUrl(sessionInfo.sessionId));
+
+    // Store debug URL for use in scoreText auth error handling
+    if (liveUrl) {
+      this.sessionDebugUrls.set(sessionInfo.sessionId, liveUrl);
+    }
 
     log("info", "StagehandProvider: Session created", {
       sessionId: sessionInfo.sessionId,
       contextId: sessionInfo.contextId,
+      needsLogin: sessionInfo.needsLogin,
       liveUrl,
     });
 
@@ -67,6 +85,8 @@ export class StagehandProvider implements BrowserProvider {
       sessionId: sessionInfo.sessionId,
       liveUrl: liveUrl ?? sessionInfo.liveUrl ?? null,
       contextId: sessionInfo.contextId,
+      needsLogin: sessionInfo.needsLogin,
+      debugUrl: liveUrl ?? undefined,
     };
   }
 
@@ -86,20 +106,36 @@ export class StagehandProvider implements BrowserProvider {
       throw new Error(`No Stagehand instance found for session: ${sessionId}`);
     }
 
-    const result = await runStagehandGrammarlyTask(stagehand, text, {
-      maxSteps: options?.maxSteps,
-      iteration: options?.iteration,
-      mode: options?.mode,
-    });
+    // Get debug URL for auth error messages
+    const debugUrl = this.sessionDebugUrls.get(sessionId);
 
-    const liveUrl = await this.sessionManager.getDebugUrl(sessionId);
+    try {
+      const result = await runStagehandGrammarlyTask(stagehand, text, {
+        maxSteps: options?.maxSteps,
+        iteration: options?.iteration,
+        mode: options?.mode,
+        debugUrl,
+      });
 
-    return {
-      aiDetectionPercent: result.aiDetectionPercent,
-      plagiarismPercent: result.plagiarismPercent,
-      notes: result.notes,
-      liveUrl,
-    };
+      const liveUrl = await this.sessionManager.getDebugUrl(sessionId);
+
+      return {
+        aiDetectionPercent: result.aiDetectionPercent,
+        plagiarismPercent: result.plagiarismPercent,
+        notes: result.notes,
+        liveUrl,
+      };
+    } catch (error) {
+      // Re-throw auth errors with enhanced messaging
+      if (error instanceof GrammarlyAuthError) {
+        log("warn", "StagehandProvider: Grammarly auth required", {
+          sessionId,
+          debugUrl: error.debugUrl,
+        });
+        throw error;
+      }
+      throw error;
+    }
   }
 
   async closeSession(sessionId: string): Promise<void> {
@@ -115,6 +151,9 @@ export class StagehandProvider implements BrowserProvider {
       }
       this.stagehandInstances.delete(sessionId);
     }
+
+    // Clean up debug URL cache
+    this.sessionDebugUrls.delete(sessionId);
 
     // Close Browserbase session
     await this.sessionManager.closeSession(sessionId);
@@ -165,6 +204,10 @@ export class StagehandProvider implements BrowserProvider {
   }
 }
 
-export { runStagehandGrammarlyTask } from "./grammarlyTask";
+export {
+  checkGrammarlyAuthStatus,
+  GrammarlyAuthError,
+  runStagehandGrammarlyTask,
+} from "./grammarlyTask";
 export { type GrammarlyExtractResult, GrammarlyExtractSchema } from "./schemas";
 export { BrowserbaseSessionManager } from "./sessionManager";

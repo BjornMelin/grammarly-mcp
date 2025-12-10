@@ -55,7 +55,9 @@ function createMockStagehand(pages: unknown[] = [createMockPage()]) {
 // Import after mocking (the module uses named imports)
 import type { Stagehand } from "@browserbasehq/stagehand";
 import {
+	checkGrammarlyAuthStatus,
 	cleanupGrammarlyDocument,
+	GrammarlyAuthError,
 	runStagehandGrammarlyTask,
 } from "../../../../src/browser/stagehand/grammarlyTask";
 
@@ -67,7 +69,11 @@ describe("runStagehandGrammarlyTask", () => {
 		mockPageGoto.mockResolvedValue(undefined);
 		mockPageEvaluate.mockResolvedValue(undefined);
 		mockWaitForLoadState.mockResolvedValue(undefined);
-		mockStagehandObserve.mockResolvedValue([{ description: "New document button" }]);
+		// Default observe returns auth indicators first, then new document button, then AI detection
+		mockStagehandObserve
+			.mockResolvedValueOnce([{ description: "User profile avatar" }]) // Auth check
+			.mockResolvedValueOnce([{ description: "New document button" }]) // New doc
+			.mockResolvedValueOnce([{ description: "AI detection" }]); // AI detection
 		mockStagehandAct.mockResolvedValue(undefined);
 		mockStagehandExtract.mockResolvedValue({
 			aiDetectionPercent: 15,
@@ -141,6 +147,11 @@ describe("runStagehandGrammarlyTask", () => {
 			const mockPage = createMockPage("https://other-site.com");
 			const stagehand = createMockStagehand([mockPage]);
 
+			// After goto(), mock should return the Grammarly URL so auth check passes
+			mockPageGoto.mockImplementation(async () => {
+				mockPageUrl.mockReturnValue("https://app.grammarly.com");
+			});
+
 			await runStagehandGrammarlyTask(stagehand as unknown as Stagehand, "Test");
 
 			expect(mockPageGoto).toHaveBeenCalledWith("https://app.grammarly.com", {
@@ -161,7 +172,11 @@ describe("runStagehandGrammarlyTask", () => {
 	describe("observe-then-act pattern", () => {
 		it("uses observed element when observation returns results", async () => {
 			const observedElement = { description: "New document", selector: "#new-doc" };
-			mockStagehandObserve.mockResolvedValue([observedElement]);
+			mockStagehandObserve.mockReset(); // Clear beforeEach mocks
+			mockStagehandObserve
+				.mockResolvedValueOnce([{ description: "User avatar" }]) // Auth check
+				.mockResolvedValueOnce([observedElement]) // New doc observe
+				.mockResolvedValueOnce([{ description: "AI detection" }]); // AI detection
 			const stagehand = createMockStagehand([createMockPage("https://app.grammarly.com")]);
 
 			await runStagehandGrammarlyTask(stagehand as unknown as Stagehand, "Test");
@@ -171,7 +186,11 @@ describe("runStagehandGrammarlyTask", () => {
 		});
 
 		it("falls back to direct action when observation returns empty array", async () => {
-			mockStagehandObserve.mockResolvedValue([]);
+			mockStagehandObserve.mockReset(); // Clear beforeEach mocks
+			mockStagehandObserve
+				.mockResolvedValueOnce([{ description: "User avatar" }]) // Auth check (logged in)
+				.mockResolvedValueOnce([]) // New doc observe returns empty
+				.mockResolvedValueOnce([{ description: "AI detection" }]); // AI detection
 			const stagehand = createMockStagehand([createMockPage("https://app.grammarly.com")]);
 
 			await runStagehandGrammarlyTask(stagehand as unknown as Stagehand, "Test");
@@ -183,7 +202,11 @@ describe("runStagehandGrammarlyTask", () => {
 		});
 
 		it("falls back to direct action when first element is undefined", async () => {
-			mockStagehandObserve.mockResolvedValue([undefined]);
+			mockStagehandObserve.mockReset(); // Clear beforeEach mocks
+			mockStagehandObserve
+				.mockResolvedValueOnce([{ description: "User avatar" }]) // Auth check
+				.mockResolvedValueOnce([undefined]) // New doc returns undefined element
+				.mockResolvedValueOnce([{ description: "AI detection" }]); // AI detection
 			const stagehand = createMockStagehand([createMockPage("https://app.grammarly.com")]);
 
 			await runStagehandGrammarlyTask(stagehand as unknown as Stagehand, "Test");
@@ -236,9 +259,11 @@ describe("runStagehandGrammarlyTask", () => {
 	describe("AI detection observation", () => {
 		it("uses observed AI detection element when found", async () => {
 			const aiDetectElement = { description: "AI Detection button" };
+			mockStagehandObserve.mockReset(); // Clear beforeEach mocks
 			mockStagehandObserve
-				.mockResolvedValueOnce([{ description: "New document" }]) // First observe
-				.mockResolvedValueOnce([aiDetectElement]); // Second observe for AI detection
+				.mockResolvedValueOnce([{ description: "User avatar" }]) // Auth check
+				.mockResolvedValueOnce([{ description: "New document" }]) // New doc observe
+				.mockResolvedValueOnce([aiDetectElement]); // AI detection observe
 
 			const stagehand = createMockStagehand([createMockPage("https://app.grammarly.com")]);
 
@@ -248,8 +273,10 @@ describe("runStagehandGrammarlyTask", () => {
 		});
 
 		it("falls back to direct action for AI detection when not observed", async () => {
+			mockStagehandObserve.mockReset(); // Clear beforeEach mocks
 			mockStagehandObserve
-				.mockResolvedValueOnce([{ description: "New document" }])
+				.mockResolvedValueOnce([{ description: "User avatar" }]) // Auth check
+				.mockResolvedValueOnce([{ description: "New document" }]) // New doc observe
 				.mockResolvedValueOnce([]); // Empty AI detection observation
 
 			const stagehand = createMockStagehand([createMockPage("https://app.grammarly.com")]);
@@ -346,6 +373,65 @@ describe("runStagehandGrammarlyTask", () => {
 				runStagehandGrammarlyTask(stagehand as unknown as Stagehand, "Test")
 			).rejects.toThrow("Primary extraction failed");
 		});
+
+		it("throws GrammarlyAuthError with debugUrl when not logged in", async () => {
+			// Mock observe to return empty (not logged in) for auth check
+			mockStagehandObserve.mockReset();
+			mockStagehandObserve.mockResolvedValue([]); // No auth indicators
+			// Also make extraction fail so the auth error is re-thrown (not caught by fallback)
+			mockStagehandExtract.mockReset();
+			mockStagehandExtract.mockRejectedValue(new Error("Extraction failed"));
+
+			const mockPage = createMockPage("https://app.grammarly.com/docs");
+			const stagehand = createMockStagehand([mockPage]);
+
+			await expect(
+				runStagehandGrammarlyTask(stagehand as unknown as Stagehand, "Test", {
+					debugUrl: "https://debug.browserbase.com/session/123",
+				})
+			).rejects.toMatchObject({
+				name: "GrammarlyAuthError",
+				debugUrl: "https://debug.browserbase.com/session/123",
+				message: expect.stringContaining("https://debug.browserbase.com/session/123"),
+			});
+		});
+
+		it("throws GrammarlyAuthError without debugUrl when not logged in", async () => {
+			mockStagehandObserve.mockReset();
+			mockStagehandObserve.mockResolvedValue([]); // No auth indicators
+			// Also make extraction fail so the auth error is re-thrown
+			mockStagehandExtract.mockReset();
+			mockStagehandExtract.mockRejectedValue(new Error("Extraction failed"));
+
+			const mockPage = createMockPage("https://app.grammarly.com/docs");
+			const stagehand = createMockStagehand([mockPage]);
+
+			try {
+				await runStagehandGrammarlyTask(stagehand as unknown as Stagehand, "Test");
+				expect.fail("Expected GrammarlyAuthError to be thrown");
+			} catch (error) {
+				expect(error).toBeInstanceOf(GrammarlyAuthError);
+				expect((error as GrammarlyAuthError).debugUrl).toBeUndefined();
+				expect((error as GrammarlyAuthError).message).toContain("BROWSERBASE_CONTEXT_ID");
+			}
+		});
+
+		it("continues task when networkidle times out", async () => {
+			// Mock waitForLoadState to reject (timeout)
+			mockWaitForLoadState.mockRejectedValue(new Error("Timeout waiting for network idle"));
+			const mockPage = createMockPage("https://app.grammarly.com/docs");
+			const stagehand = createMockStagehand([mockPage]);
+
+			// The task should still complete despite networkidle timeout
+			const result = await runStagehandGrammarlyTask(
+				stagehand as unknown as Stagehand,
+				"Test"
+			);
+
+			// Should have called extract despite timeout
+			expect(mockStagehandExtract).toHaveBeenCalled();
+			expect(result).toBeDefined();
+		});
 	});
 
 	describe("options handling", () => {
@@ -381,6 +467,104 @@ describe("runStagehandGrammarlyTask", () => {
 
 			expect(mockStagehandExtract).toHaveBeenCalled();
 		});
+	});
+});
+
+describe("checkGrammarlyAuthStatus", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns loggedIn false when no page available", async () => {
+		const stagehand = createMockStagehand([]);
+
+		await expect(
+			checkGrammarlyAuthStatus(stagehand as unknown as Stagehand)
+		).rejects.toThrow("No page found in browser context");
+	});
+
+	it("returns loggedIn false when on signin page", async () => {
+		const mockPage = createMockPage("https://app.grammarly.com/signin");
+		const stagehand = createMockStagehand([mockPage]);
+
+		const result = await checkGrammarlyAuthStatus(stagehand as unknown as Stagehand);
+
+		expect(result).toEqual({ loggedIn: false, currentUrl: "https://app.grammarly.com/signin" });
+	});
+
+	it("returns loggedIn false when on login page", async () => {
+		const mockPage = createMockPage("https://app.grammarly.com/login");
+		const stagehand = createMockStagehand([mockPage]);
+
+		const result = await checkGrammarlyAuthStatus(stagehand as unknown as Stagehand);
+
+		expect(result).toEqual({ loggedIn: false, currentUrl: "https://app.grammarly.com/login" });
+	});
+
+	it("returns loggedIn false when on signup page", async () => {
+		const mockPage = createMockPage("https://app.grammarly.com/signup");
+		const stagehand = createMockStagehand([mockPage]);
+
+		const result = await checkGrammarlyAuthStatus(stagehand as unknown as Stagehand);
+
+		expect(result).toEqual({ loggedIn: false, currentUrl: "https://app.grammarly.com/signup" });
+	});
+
+	it("returns loggedIn true when auth indicators found on app page", async () => {
+		mockStagehandObserve.mockResolvedValue([{ description: "User avatar" }]);
+		const mockPage = createMockPage("https://app.grammarly.com/docs");
+		const stagehand = createMockStagehand([mockPage]);
+
+		const result = await checkGrammarlyAuthStatus(stagehand as unknown as Stagehand);
+
+		expect(result).toEqual({ loggedIn: true, currentUrl: "https://app.grammarly.com/docs" });
+	});
+
+	it("returns loggedIn false when no auth indicators found on app page", async () => {
+		mockStagehandObserve.mockResolvedValue([]);
+		const mockPage = createMockPage("https://app.grammarly.com/docs");
+		const stagehand = createMockStagehand([mockPage]);
+
+		const result = await checkGrammarlyAuthStatus(stagehand as unknown as Stagehand);
+
+		expect(result).toEqual({ loggedIn: false, currentUrl: "https://app.grammarly.com/docs" });
+	});
+
+	it("returns loggedIn false when observe throws error on app page", async () => {
+		mockStagehandObserve.mockRejectedValue(new Error("Observe failed"));
+		const mockPage = createMockPage("https://app.grammarly.com/docs");
+		const stagehand = createMockStagehand([mockPage]);
+
+		const result = await checkGrammarlyAuthStatus(stagehand as unknown as Stagehand);
+
+		expect(result).toEqual({ loggedIn: false, currentUrl: "https://app.grammarly.com/docs" });
+	});
+
+	it("returns loggedIn false when not on Grammarly yet", async () => {
+		const mockPage = createMockPage("https://google.com");
+		const stagehand = createMockStagehand([mockPage]);
+
+		const result = await checkGrammarlyAuthStatus(stagehand as unknown as Stagehand);
+
+		expect(result).toEqual({ loggedIn: false, currentUrl: "https://google.com" });
+	});
+});
+
+describe("GrammarlyAuthError", () => {
+	it("creates error with message and debugUrl", () => {
+		const error = new GrammarlyAuthError("Login required", "https://debug.url");
+
+		expect(error.name).toBe("GrammarlyAuthError");
+		expect(error.message).toBe("Login required");
+		expect(error.debugUrl).toBe("https://debug.url");
+	});
+
+	it("creates error with message only", () => {
+		const error = new GrammarlyAuthError("Login required");
+
+		expect(error.name).toBe("GrammarlyAuthError");
+		expect(error.message).toBe("Login required");
+		expect(error.debugUrl).toBeUndefined();
 	});
 });
 

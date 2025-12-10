@@ -678,15 +678,101 @@ describe("runGrammarlyOptimization", () => {
 			expect(mockProviderCloseSession).toHaveBeenCalled();
 		});
 
-		it("passes proxy_country_code to session creation", async () => {
-			await runGrammarlyOptimization(baseConfig, {
-				...baseInput,
-				proxy_country_code: "gb",
+		it("adds login guidance to history when needsLogin is true with debugUrl", async () => {
+			mockProviderCreateSession.mockResolvedValue({
+				sessionId: "new-session",
+				liveUrl: "https://live.url",
+				contextId: "ctx-123",
+				needsLogin: true,
+				debugUrl: "https://debug.browserbase.com/session/abc",
+			});
+			mockProviderScoreText.mockResolvedValue({
+				aiDetectionPercent: 8,
+				plagiarismPercent: 2,
+				notes: "Success",
 			});
 
-			expect(mockProviderCreateSession).toHaveBeenCalledWith({
-				proxyCountryCode: "gb",
+			const result = await runGrammarlyOptimization(baseConfig, {
+				...baseInput,
+				mode: "score_only",
 			});
+
+			// Should have login guidance in history (iteration -1)
+			const loginEntry = result.history.find((h) => h.iteration === -1);
+			expect(loginEntry).toBeDefined();
+			expect(loginEntry?.note).toContain("https://debug.browserbase.com/session/abc");
+			expect(loginEntry?.note).toContain("BROWSERBASE_CONTEXT_ID=ctx-123");
+		});
+
+		it("adds login guidance with liveUrl fallback when debugUrl not available", async () => {
+			mockProviderCreateSession.mockResolvedValue({
+				sessionId: "new-session",
+				liveUrl: "https://live.fallback.url",
+				contextId: "ctx-456",
+				needsLogin: true,
+				// No debugUrl - should fall back to liveUrl
+			});
+			mockProviderScoreText.mockResolvedValue({
+				aiDetectionPercent: 8,
+				plagiarismPercent: 2,
+				notes: "Success",
+			});
+
+			const result = await runGrammarlyOptimization(baseConfig, {
+				...baseInput,
+				mode: "score_only",
+			});
+
+			const loginEntry = result.history.find((h) => h.iteration === -1);
+			expect(loginEntry).toBeDefined();
+			expect(loginEntry?.note).toContain("https://live.fallback.url");
+			expect(loginEntry?.note).toContain("BROWSERBASE_CONTEXT_ID=ctx-456");
+		});
+
+		it("uses your-context-id placeholder when contextId not available", async () => {
+			mockProviderCreateSession.mockResolvedValue({
+				sessionId: "new-session",
+				liveUrl: "https://live.url",
+				needsLogin: true,
+				// No contextId
+			});
+			mockProviderScoreText.mockResolvedValue({
+				aiDetectionPercent: 8,
+				plagiarismPercent: 2,
+				notes: "Success",
+			});
+
+			const result = await runGrammarlyOptimization(baseConfig, {
+				...baseInput,
+				mode: "score_only",
+			});
+
+			const loginEntry = result.history.find((h) => h.iteration === -1);
+			expect(loginEntry).toBeDefined();
+			expect(loginEntry?.note).toContain("BROWSERBASE_CONTEXT_ID=your-context-id");
+		});
+
+		it("does not add login guidance when needsLogin is false", async () => {
+			mockProviderCreateSession.mockResolvedValue({
+				sessionId: "existing-session",
+				liveUrl: "https://live.url",
+				contextId: "ctx-789",
+				needsLogin: false,
+			});
+			mockProviderScoreText.mockResolvedValue({
+				aiDetectionPercent: 8,
+				plagiarismPercent: 2,
+				notes: "Success",
+			});
+
+			const result = await runGrammarlyOptimization(baseConfig, {
+				...baseInput,
+				mode: "score_only",
+			});
+
+			// Should NOT have login guidance (no iteration -1)
+			const loginEntry = result.history.find((h) => h.iteration === -1);
+			expect(loginEntry).toBeUndefined();
 		});
 	});
 

@@ -103,12 +103,12 @@ describe("BrowserUseProvider", () => {
 			});
 
 			const provider = new BrowserUseProvider(baseConfig);
-			await provider.createSession({ proxyCountryCode: "US" });
+			await provider.createSession({ proxyCountry: "US" });
 
 			expect(mockCreateGrammarlySession).toHaveBeenCalledWith(
 				mockClient,
 				baseConfig,
-				{ proxyCountryCode: "US" }
+				{ proxyCountry: "US" }
 			);
 		});
 

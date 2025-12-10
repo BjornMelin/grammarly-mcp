@@ -36,6 +36,15 @@ vi.mock("../../../../src/llm/stagehandLlm", () => ({
 // Mock grammarly task
 vi.mock("../../../../src/browser/stagehand/grammarlyTask", () => ({
 	runStagehandGrammarlyTask: (...args: unknown[]) => mockRunStagehandGrammarlyTask(...args),
+	GrammarlyAuthError: class GrammarlyAuthError extends Error {
+		readonly debugUrl: string | undefined;
+		constructor(message: string, debugUrl?: string) {
+			super(message);
+			this.name = "GrammarlyAuthError";
+			this.debugUrl = debugUrl;
+		}
+	},
+	checkGrammarlyAuthStatus: vi.fn().mockResolvedValue({ loggedIn: true, currentUrl: "" }),
 }));
 
 // Import after mocking
@@ -69,6 +78,8 @@ const baseConfig: AppConfig = {
 	defaultMaxAiPercent: 10,
 	defaultMaxPlagiarismPercent: 5,
 	defaultMaxIterations: 5,
+	proxyConfig: null,
+	stealthConfig: null,
 };
 
 describe("StagehandProvider", () => {
@@ -114,19 +125,24 @@ describe("StagehandProvider", () => {
 			);
 		});
 
-		it("ignores proxyCountryCode option (not supported)", async () => {
-			// proxyCountryCode is accepted in the interface but not passed to session manager
+		it("passes proxy and stealth options to session manager", async () => {
 			const provider = new StagehandProvider(baseConfig);
-			await provider.createSession({ proxyCountryCode: "UK" });
+			await provider.createSession({
+				proxyCountry: "UK",
+				proxyEnabled: true,
+				advancedStealth: true,
+				blockAds: false,
+			});
 
-			// Should be called without proxyCountry since it was removed from session options
+			// Session options should be passed through to session manager
 			expect(mockGetOrCreateSession).toHaveBeenCalledWith(
-				expect.objectContaining({ contextId: undefined })
+				expect.objectContaining({
+					proxyCountry: "UK",
+					proxyEnabled: true,
+					advancedStealth: true,
+					blockAds: false,
+				})
 			);
-
-			// Ensure no proxy-related fields were forwarded
-			const callArg = mockGetOrCreateSession.mock.calls[0]?.[0] ?? {};
-			expect(callArg).not.toHaveProperty("proxyCountryCode");
 		});
 
 		it("initializes Stagehand instance", async () => {
@@ -144,6 +160,8 @@ describe("StagehandProvider", () => {
 				sessionId: "bb-session-123",
 				liveUrl: "https://debug.url",
 				contextId: "ctx-456",
+				needsLogin: undefined,
+				debugUrl: "https://debug.url",
 			});
 		});
 
@@ -191,7 +209,9 @@ describe("StagehandProvider", () => {
 			expect(mockRunStagehandGrammarlyTask).toHaveBeenCalledWith(
 				expect.anything(), // stagehand instance
 				"Test text",
-				{}
+				expect.objectContaining({
+					debugUrl: "https://debug.url",
+				})
 			);
 		});
 
@@ -207,11 +227,12 @@ describe("StagehandProvider", () => {
 			expect(mockRunStagehandGrammarlyTask).toHaveBeenCalledWith(
 				expect.anything(),
 				"Text",
-				{
+				expect.objectContaining({
 					maxSteps: 100,
 					iteration: 3,
 					mode: "analyze",
-				}
+					debugUrl: "https://debug.url",
+				})
 			);
 		});
 
@@ -274,6 +295,98 @@ describe("StagehandProvider", () => {
 				provider.closeSession("non-existent")
 			).resolves.not.toThrow();
 			expect(mockCloseSession).toHaveBeenCalledWith("non-existent");
+		});
+	});
+
+	describe("BYOP (Bring Your Own Proxy) passthrough", () => {
+		it("passes BYOP options to session manager", async () => {
+			const provider = new StagehandProvider(baseConfig);
+			await provider.createSession({
+				proxyEnabled: true,
+				proxyType: "external",
+				proxyServer: "http://geo.iproyal.com:12321",
+				proxyUsername: "iproyal_user",
+				proxyPassword: "iproyal_pass_country-us",
+			});
+
+			expect(mockGetOrCreateSession).toHaveBeenCalledWith(
+				expect.objectContaining({
+					proxyEnabled: true,
+					proxyType: "external",
+					proxyServer: "http://geo.iproyal.com:12321",
+					proxyUsername: "iproyal_user",
+					proxyPassword: "iproyal_pass_country-us",
+				})
+			);
+		});
+
+		it("passes browserbase proxy options to session manager", async () => {
+			const provider = new StagehandProvider(baseConfig);
+			await provider.createSession({
+				proxyEnabled: true,
+				proxyType: "browserbase",
+				proxyCountry: "GB",
+			});
+
+			expect(mockGetOrCreateSession).toHaveBeenCalledWith(
+				expect.objectContaining({
+					proxyEnabled: true,
+					proxyType: "browserbase",
+					proxyCountry: "GB",
+				})
+			);
+		});
+
+		it("passes all session options including BYOP fields", async () => {
+			const provider = new StagehandProvider(baseConfig);
+			await provider.createSession({
+				advancedStealth: true,
+				blockAds: true,
+				solveCaptchas: true,
+				viewport: { width: 1920, height: 1080 },
+				proxyEnabled: true,
+				proxyType: "external",
+				proxyServer: "http://proxy.example.com:8080",
+				proxyUsername: "user",
+				proxyPassword: "pass",
+			});
+
+			expect(mockGetOrCreateSession).toHaveBeenCalledWith(
+				expect.objectContaining({
+					advancedStealth: true,
+					blockAds: true,
+					solveCaptchas: true,
+					viewport: { width: 1920, height: 1080 },
+					proxyEnabled: true,
+					proxyType: "external",
+					proxyServer: "http://proxy.example.com:8080",
+					proxyUsername: "user",
+					proxyPassword: "pass",
+				})
+			);
+		});
+
+		it("does not apply proxy settings when proxyEnabled is false", async () => {
+			const provider = new StagehandProvider(baseConfig);
+			await provider.createSession({
+				proxyEnabled: false,
+				proxyType: "external",
+				proxyServer: "http://proxy.example.com:8080",
+				proxyUsername: "user",
+				proxyPassword: "pass",
+				proxyCountry: "US",
+			});
+
+			expect(mockGetOrCreateSession).toHaveBeenCalledWith(
+				expect.objectContaining({
+					proxyEnabled: false,
+					proxyType: undefined,
+					proxyServer: undefined,
+					proxyUsername: undefined,
+					proxyPassword: undefined,
+					proxyCountry: undefined,
+				})
+			);
 		});
 	});
 });
