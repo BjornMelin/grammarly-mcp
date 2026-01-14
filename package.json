@@ -1,6 +1,6 @@
 {
   "name": "grammarly-mcp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "MCP server for Grammarly AI detection and plagiarism scoring via Stagehand + Browserbase browser automation.",
   "private": true,
   "type": "module",
